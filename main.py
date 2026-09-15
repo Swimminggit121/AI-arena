@@ -4,6 +4,9 @@ from simulation import Simulation
 from arena import Arena
 
 
+VERSION = "0.4.3"
+
+
 class AIArena:
     def __init__(self, root):
         self.root = root
@@ -12,6 +15,214 @@ class AIArena:
         self.root.geometry("980x760")
         self.root.minsize(980, 760)
         self.root.configure(background="#0b0d10")
+
+        self.simulation = None
+        self.arena = None
+
+        self.show_menu()
+
+    def clear_screen(self):
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        self.arena = None
+
+    def create_button(
+        self,
+        parent,
+        text,
+        command,
+        width=24
+    ):
+        button = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            background="#1c2129",
+            foreground="#ffffff",
+            activebackground="#282f3a",
+            activeforeground="#ffffff",
+            relief="flat",
+            borderwidth=0,
+            width=width,
+            pady=12,
+            font=("Arial", 11, "bold"),
+            cursor="hand2"
+        )
+
+        button.pack(
+            pady=7
+        )
+
+        return button
+
+    def show_menu(self):
+        self.clear_screen()
+
+        menu = tk.Frame(
+            self.root,
+            background="#0b0d10"
+        )
+
+        menu.place(
+            relx=0.5,
+            rely=0.5,
+            anchor="center"
+        )
+
+        title = tk.Label(
+            menu,
+            text="AI ARENA",
+            background="#0b0d10",
+            foreground="#ffffff",
+            font=("Arial", 32, "bold")
+        )
+
+        title.pack(
+            pady=(0, 5)
+        )
+
+        subtitle = tk.Label(
+            menu,
+            text="Autonomous agents. One arena.",
+            background="#0b0d10",
+            foreground="#777d87",
+            font=("Arial", 11)
+        )
+
+        subtitle.pack(
+            pady=(0, 30)
+        )
+
+        self.create_button(
+            menu,
+            "START",
+            self.start_game
+        )
+
+        self.create_button(
+            menu,
+            "KEYBINDINGS",
+            self.show_keybindings
+        )
+
+        self.create_button(
+            menu,
+            "QUIT",
+            self.root.destroy
+        )
+
+        version = tk.Label(
+            menu,
+            text=f"V{VERSION}",
+            background="#0b0d10",
+            foreground="#555b64",
+            font=("Arial", 9)
+        )
+
+        version.pack(
+            pady=(25, 0)
+        )
+
+    def show_keybindings(self):
+        self.clear_screen()
+
+        container = tk.Frame(
+            self.root,
+            background="#0b0d10"
+        )
+
+        container.place(
+            relx=0.5,
+            rely=0.5,
+            anchor="center"
+        )
+
+        title = tk.Label(
+            container,
+            text="KEYBINDINGS",
+            background="#0b0d10",
+            foreground="#ffffff",
+            font=("Arial", 24, "bold")
+        )
+
+        title.pack(
+            pady=(0, 25)
+        )
+
+        bindings = [
+            ("G", "Toggle grid"),
+            ("L", "Toggle agent labels"),
+            ("H", "Toggle health bars"),
+            ("E", "Toggle energy bars"),
+            ("T", "Toggle target lines"),
+            ("V", "Toggle vision"),
+            ("R", "Toggle resources"),
+            ("O", "Toggle obstacles"),
+            ("F", "Toggle attack effects"),
+            ("S", "Toggle spawn points"),
+            ("↑ / ↓", "Change simulation speed"),
+            ("← / →", "Cycle selected agent"),
+            ("ESC", "Clear selection"),
+        ]
+
+        table = tk.Frame(
+            container,
+            background="#0b0d10"
+        )
+
+        table.pack()
+
+        for key, description in bindings:
+            row = tk.Frame(
+                table,
+                background="#0b0d10"
+            )
+
+            row.pack(
+                fill="x",
+                pady=4
+            )
+
+            key_label = tk.Label(
+                row,
+                text=key,
+                background="#1c2129",
+                foreground="#ffffff",
+                width=10,
+                font=("Arial", 10, "bold"),
+                padx=5,
+                pady=5
+            )
+
+            key_label.pack(
+                side="left"
+            )
+
+            description_label = tk.Label(
+                row,
+                text=description,
+                background="#0b0d10",
+                foreground="#a0a5ad",
+                width=28,
+                anchor="w",
+                font=("Arial", 10),
+                padx=12
+            )
+
+            description_label.pack(
+                side="left"
+            )
+
+        self.create_button(
+            container,
+            "BACK",
+            self.show_menu,
+            width=24
+        )
+
+    def start_game(self):
+        self.clear_screen()
 
         self.simulation = Simulation(
             width=900,
@@ -50,7 +261,9 @@ class AIArena:
             font=("Arial", 22, "bold")
         )
 
-        title.pack(side="left")
+        title.pack(
+            side="left"
+        )
 
         self.status_label = tk.Label(
             header,
@@ -88,10 +301,13 @@ class AIArena:
             relief="flat",
             padx=20,
             pady=8,
-            font=("Arial", 10, "bold")
+            font=("Arial", 10, "bold"),
+            cursor="hand2"
         )
 
-        self.start_button.pack(side="left")
+        self.start_button.pack(
+            side="left"
+        )
 
         reset_button = tk.Button(
             controls,
@@ -104,10 +320,31 @@ class AIArena:
             relief="flat",
             padx=20,
             pady=8,
-            font=("Arial", 10, "bold")
+            font=("Arial", 10, "bold"),
+            cursor="hand2"
         )
 
         reset_button.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        menu_button = tk.Button(
+            controls,
+            text="MENU",
+            command=self.show_menu,
+            background="#1c2129",
+            foreground="#ffffff",
+            activebackground="#282f3a",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=20,
+            pady=8,
+            font=("Arial", 10, "bold"),
+            cursor="hand2"
+        )
+
+        menu_button.pack(
             side="left",
             padx=(10, 0)
         )
@@ -164,13 +401,18 @@ class AIArena:
         self.update_display()
 
     def update_display(self):
-        self.arena.draw()
+        if self.arena is not None:
+            self.arena.draw()
 
-        self.tick_label.config(
-            text=f"Tick: {self.simulation.world.tick}"
-        )
+        if self.simulation is not None:
+            self.tick_label.config(
+                text=f"Tick: {self.simulation.world.tick}"
+            )
 
     def update_loop(self):
+        if self.arena is None or self.simulation is None:
+            return
+
         self.simulation.update()
         self.update_display()
 
