@@ -1,14 +1,14 @@
-# AI Arena
+AI Arena
 
 AI Arena is a real-time Python simulation where autonomous AI agents interact, compete, and survive in a dynamic world.
 
-> **Current version:** V0.4.3
+> **Current version:** V0.5.3
 
-## Screenshots
+Screenshots
 
-Screenshots of the simulation will be added here.
 
-## Features
+
+Features
 
 - Autonomous AI agents
 - Real-time simulation
@@ -23,7 +23,7 @@ Screenshots of the simulation will be added here.
 - Performance-focused systems
 - Windows `.exe` release
 
-## How It Works
+How It Works
 
 AI Arena places autonomous agents inside a simulated world and allows them to make decisions based on their surroundings and their individual characteristics.
 
@@ -40,7 +40,7 @@ Agents can:
 
 Different agents can have different personalities, which affects how they behave inside the arena.
 
-## Agent Customisation
+Agent Customisation
 
 One of the main parts of AI Arena is that you can experiment with the agent code yourself.
 
@@ -48,7 +48,7 @@ Feel free to edit the code of the agents to improve them or change their behavio
 
 You can change the decision-making systems, personalities, priorities and other parts of the agent logic, then run the simulation and see what happens.
 
-## Controls
+Controls
 
 AI Arena includes an in-game **Keybindings** menu.
 
@@ -68,21 +68,21 @@ AI Arena includes an in-game **Keybindings** menu.
 | `← / →` | Cycle selected agent |
 | `ESC` | Clear selection |
 
-## Download
+Download
 
 Windows builds are available from the project's [GitHub Releases](../../releases) page.
 
 The project is intended to provide a simple downloadable Windows executable as well as the source code for people who want to experiment with the simulation.
 
-## Running From Source
+Running From Source
 
-### Requirements
+Requirements
 
 - Python 3.14
 - Windows, macOS or Linux for running from source
 - The Python packages listed in `requirements.txt`
 
-### Installation
+Installation
 
 Clone the repository:
 
@@ -103,7 +103,7 @@ Run AI Arena:
 python main.py
 ```
 
-## Project Structure
+Project Structure
 
 | File | Purpose |
 |---|---|
@@ -114,7 +114,7 @@ python main.py
 | `simulation.py` | Controls the simulation and updates the agents |
 | `requirements.txt` | Lists the Python dependencies |
 
-## Development
+Development
 
 AI Arena is actively being developed.
 
@@ -127,36 +127,32 @@ Current development focuses on:
 - Improving the user interface
 - Adding more customisation options
 
-## Building
+Building
 
 Windows releases are built automatically using **GitHub Actions** and **PyInstaller**.
 
 The workflow builds the application into a Windows executable for distribution.
 
-## Releases
+Releases
 
 Each significant version of AI Arena can be released separately so that previous versions remain available.
 
 Check the [Releases](../../releases) page for available versions.
 
-## Known Issues
+Known Issues
 
 AI Arena is still under development. Larger simulations may require more processing power, and behaviour may change as the agent systems continue to be developed.
 
-## Contributing
+Contributing
 
 You can experiment with the source code and create your own changes to the agent behaviour and simulation systems.
 
 If you make an interesting improvement, feel free to share it with the project.
 
-## Credits
+Credits
 
 Created by **Swimminggit121**.
 
-## Repository
+Repository
 
 [View the AI Arena source code on GitHub](https://github.com/Swimminggit121/AI-arena)
-
-## License
-
-See the repository for the project's license and usage information.
