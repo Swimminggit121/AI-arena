@@ -5,7 +5,11 @@ AI Arena is a real-time Python simulation where autonomous AI agents interact, c
 > **Current version:** V0.5.3
 
 Screenshots
+<img width="1218" height="976" alt="Screenshot 2026-09-20 213707" src="https://github.com/user-attachments/assets/9d6f8119-4c7f-432b-b82a-f275d8a01f9b" />
 
+<img width="1217" height="981" alt="Screenshot 2026-09-20 213729" src="https://github.com/user-attachments/assets/2a68af42-729c-48cc-b461-79f05915f306" />
+
+<img width="1221" height="984" alt="Screenshot 2026-09-20 224043" src="https://github.com/user-attachments/assets/bf140268-d389-42b2-b6f2-261873a94da6" />
 
 
 Features
