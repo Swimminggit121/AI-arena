@@ -5,115 +5,102 @@ from agent import Agent
 from world import World
 
 
-VERSION = "0.5.0"
-
-
 class Simulation:
+    """
+    Main controller for AI Arena.
+
+    Handles:
+    - Agent creation
+    - Simulation timing
+    - AI decision cycles
+    - Combat
+    - Resources
+    - Scoring
+    - Rankings
+    - Teams
+    - Rounds
+    - Statistics
+    - Events
+    - Winners
+    """
+
+    VERSION = "0.3.0"
+
     def __init__(
         self,
         width=900,
         height=600,
-        agent_count=6,
+        agent_count=3
     ):
         self.width = width
         self.height = height
 
-        self.agent_count = agent_count
+        self.agent_count = max(
+            1,
+            int(agent_count)
+        )
 
         self.world = World(
             width,
-            height,
+            height
         )
+
+        self.agents = []
 
         self.running = False
         self.paused = False
         self.finished = False
 
-        self.tick = 0
-        self.round = 1
-
-        self.simulation_speed = 1.0
-
-        self.min_speed = 0.25
-        self.max_speed = 8.0
-
-        self.base_tick_rate = 30.0
-
-        self.tick_interval = (
-            1.0 / self.base_tick_rate
-        )
-
-        self.accumulator = 0.0
-        self.last_update_time = (
-            time.perf_counter()
-        )
-
-        self.max_ticks_per_update = 5
-
+        self.round_number = 1
+        self.round_ticks = 0
         self.total_ticks = 0
 
+        self.maximum_round_ticks = 10000
+
+        self.speed_multiplier = 1.0
+
         self.start_time = None
-        self.elapsed_time = 0.0
+        self.last_update_time = None
+        self.elapsed_real_time = 0.0
 
         self.winner = None
-        self.team_winner = None
+        self.winner_reason = None
 
-        self.team_mode = True
-
-        self.teams = [
-            "red",
-            "blue",
-        ]
-
-        self.team_scores = {
-            "red": 0,
-            "blue": 0,
-        }
-
-        self.team_kills = {
-            "red": 0,
-            "blue": 0,
-        }
-
-        self.team_damage = {
-            "red": 0.0,
-            "blue": 0.0,
-        }
+        self.team_mode = False
+        self.team_count = 2
 
         self.combat_enabled = True
         self.resources_enabled = True
 
-        self.history = []
-        self.event_log = []
+        self.round_history = []
+        self.event_history = []
 
+        self.population_history = []
+        self.score_history = []
+
+        self.total_decisions = 0
         self.total_attacks = 0
         self.total_damage = 0.0
+        self.total_kills = 0
         self.total_deaths = 0
 
-        self.performance = {
-            "fps": 0.0,
-            "simulation_tps": 0.0,
-            "last_update_ms": 0.0,
-            "agent_update_ms": 0.0,
-            "combat_ms": 0.0,
-            "world_ms": 0.0,
-            "total_ms": 0.0,
-        }
+        self.best_agent = None
+        self.best_score = 0.0
 
-        self._performance_time = (
-            time.perf_counter()
-        )
+        self.last_rank_update = 0
 
-        self._performance_frames = 0
-        self._performance_ticks = 0
+        self.rank_update_interval = 10
 
-        self._last_agent_count = -1
-        self._last_alive_count = -1
+        self.event_limit = 500
 
-        self.create_agents()
+        self.reset()
 
     def create_agents(self):
-        self.agents = []
+        """
+        Create the starting population.
+        """
+
+        self.agents.clear()
 
         personalities = [
             "aggressive",
@@ -122,128 +109,218 @@ class Simulation:
             "balanced",
         ]
 
-        for i in range(
+        for index in range(
             self.agent_count
         ):
-            personality = personalities[
-                i % len(personalities)
-            ]
+            margin = 60
 
-            if self.team_mode:
-                team = self.teams[
-                    i % len(self.teams)
+            x = random.uniform(
+                margin,
+                self.world.width - margin
+            )
+
+            y = random.uniform(
+                margin,
+                self.world.height - margin
+            )
+
+            personality = (
+                personalities[
+                    index
+                    % len(personalities)
                 ]
-            else:
-                team = "neutral"
+            )
 
             agent = Agent(
-                i,
-                x=random.uniform(
-                    50,
-                    self.width - 50,
-                ),
-                y=random.uniform(
-                    50,
-                    self.height - 50,
-                ),
-                personality=personality,
-                team=team
-                if team in self.teams
-                else None,
+                agent_id=index + 1,
+                x=x,
+                y=y,
+                personality=personality
+            )
+
+            self.configure_agent(
+                agent,
+                index
             )
 
             self.agents.append(
                 agent
             )
 
-        self.world.agents = (
-            self.agents
-        )
+        self.world.agents = self.agents
 
-        self.assign_teams()
-
-    def add_agent(
+    def configure_agent(
         self,
-        personality="balanced",
-        team=None,
-        x=None,
-        y=None,
+        agent,
+        index
     ):
-        if x is None:
-            x = random.uniform(
-                50,
-                self.width - 50,
-            )
+        """
+        Add simulation-specific properties
+        to an Agent.
 
-        if y is None:
-            y = random.uniform(
-                50,
-                self.height - 50,
-            )
+        Keeping these properties here means
+        the Agent class can concentrate on
+        behaviour while Simulation handles
+        arena-specific scoring and combat.
+        """
 
-        if self.team_mode:
-            if team not in self.teams:
-                team = self.get_smallest_team()
-        else:
-            team = None
-
-        agent = Agent(
-            len(self.world.agents),
-            x=x,
-            y=y,
-            personality=personality,
-            team=team,
+        agent.team = self.get_team_for_agent(
+            index
         )
 
-        self.world.agents.append(
-            agent
+        agent.score = 0.0
+
+        agent.rank = index + 1
+
+        agent.attacks = 0
+
+        agent.successful_attacks = 0
+
+        agent.kills = 0
+
+        agent.damage_dealt = 0.0
+
+        agent.damage_taken = 0.0
+
+        agent.resources_collected = 0.0
+
+        agent.survival_ticks = 0
+
+        agent.combat_experience = 0.0
+
+        agent.exploration_score = 0.0
+
+        agent.combat_score = 0.0
+
+        agent.survival_score = 0.0
+
+        agent.behaviour_score = 0.0
+
+        agent.last_action = "spawn"
+
+        agent.last_decision = "spawn"
+
+        agent.attack_cooldown = 0
+
+        agent.attack_range = random.uniform(
+            28.0,
+            42.0
         )
 
-        self.agents = (
-            self.world.agents
+        agent.attack_damage = random.uniform(
+            4.0,
+            9.0
         )
 
-        self.agent_count = len(
-            self.world.agents
+        agent.attack_accuracy = random.uniform(
+            0.65,
+            0.95
         )
 
-        return agent
+        agent.defence = random.uniform(
+            0.05,
+            0.35
+        )
 
-    def remove_agent(self, agent):
-        if agent in self.world.agents:
-            self.world.agents.remove(
-                agent
-            )
+        agent.resource_priority = random.uniform(
+            0.3,
+            1.0
+        )
 
-            self.agents = (
-                self.world.agents
-            )
+        agent.spawn_x = agent.x
+        agent.spawn_y = agent.y
 
-            self.agent_count = len(
-                self.world.agents
-            )
+    def get_team_for_agent(
+        self,
+        index
+    ):
+        """
+        Determine which team an agent belongs to.
+        """
+
+        if not self.team_mode:
+            return index + 1
+
+        return (
+            index
+            % self.team_count
+        ) + 1
+
+    def reset(self):
+        """
+        Reset the entire simulation.
+        """
+
+        self.running = False
+        self.paused = False
+        self.finished = False
+
+        self.round_number = 1
+        self.round_ticks = 0
+        self.total_ticks = 0
+
+        self.start_time = None
+        self.last_update_time = None
+        self.elapsed_real_time = 0.0
+
+        self.winner = None
+        self.winner_reason = None
+
+        self.round_history.clear()
+        self.event_history.clear()
+
+        self.population_history.clear()
+        self.score_history.clear()
+
+        self.total_decisions = 0
+        self.total_attacks = 0
+        self.total_damage = 0.0
+        self.total_kills = 0
+        self.total_deaths = 0
+
+        self.best_agent = None
+        self.best_score = 0.0
+
+        self.last_rank_update = 0
+
+        self.world.reset()
+
+        self.create_agents()
+
+        self.log_event(
+            "Simulation reset"
+        )
 
     def start(self):
+        """
+        Start or resume the simulation.
+        """
+
         if self.finished:
             return
 
         self.running = True
         self.paused = False
 
-        self.last_update_time = (
-            time.perf_counter()
-        )
+        now = time.time()
 
         if self.start_time is None:
-            self.start_time = (
-                time.perf_counter()
-            )
+            self.start_time = now
+
+        self.last_update_time = now
 
         self.log_event(
-            "Team warfare started"
+            "Simulation started"
         )
 
     def stop(self):
+        """
+        Pause the simulation.
+        """
+
+        if not self.running:
+            return
+
         self.running = False
         self.paused = True
 
@@ -251,1283 +328,1569 @@ class Simulation:
             "Simulation paused"
         )
 
-    def pause(self):
-        self.stop()
-
-    def resume(self):
-        if self.finished:
-            return
-
-        self.running = True
-        self.paused = False
-
-        self.last_update_time = (
-            time.perf_counter()
-        )
-
-        self.log_event(
-            "Simulation resumed"
-        )
-
     def toggle(self):
+        """
+        Toggle simulation state.
+        """
+
         if self.running:
             self.stop()
         else:
             self.start()
 
-    def reset(self):
-        self.running = False
-        self.paused = False
-        self.finished = False
+    def update(self):
+        """
+        Advance the simulation.
 
-        self.tick = 0
-        self.total_ticks = 0
-        self.round = 1
+        The UI calls this repeatedly.
+        """
 
-        self.accumulator = 0.0
+        if not self.running:
+            return
 
-        self.start_time = None
-        self.elapsed_time = 0.0
+        if self.finished:
+            self.running = False
+            return
 
-        self.winner = None
-        self.team_winner = None
+        now = time.time()
 
-        self.team_scores = {
-            "red": 0,
-            "blue": 0,
-        }
+        if self.last_update_time is not None:
+            self.elapsed_real_time += (
+                now
+                - self.last_update_time
+            )
 
-        self.team_kills = {
-            "red": 0,
-            "blue": 0,
-        }
+        self.last_update_time = now
 
-        self.team_damage = {
-            "red": 0.0,
-            "blue": 0.0,
-        }
-
-        self.history.clear()
-        self.event_log.clear()
-
-        self.total_attacks = 0
-        self.total_damage = 0.0
-        self.total_deaths = 0
-
-        self.performance = {
-            "fps": 0.0,
-            "simulation_tps": 0.0,
-            "last_update_ms": 0.0,
-            "agent_update_ms": 0.0,
-            "combat_ms": 0.0,
-            "world_ms": 0.0,
-            "total_ms": 0.0,
-        }
-
-        self._performance_time = (
-            time.perf_counter()
+        updates = max(
+            1,
+            int(self.speed_multiplier)
         )
 
-        self._performance_frames = 0
-        self._performance_ticks = 0
+        for _ in range(updates):
+            if not self.running:
+                break
+
+            if self.finished:
+                break
+
+            self.update_tick()
+
+    def update_tick(self):
+        """
+        Process one complete simulation tick.
+        """
+
+        self.total_ticks += 1
+        self.round_ticks += 1
+
+        self.world.update(
+            self.agents
+        )
+
+        self.run_ai_phase()
+
+        if self.combat_enabled:
+            self.run_combat_phase()
+
+        if self.resources_enabled:
+            self.run_resource_phase()
+
+        self.update_survival()
+
+        self.update_scores()
+
+        self.update_rankings()
+
+        self.record_history()
+
+        self.check_deaths()
+
+        self.check_winner()
+
+        self.check_round_timeout()
+
+    def run_ai_phase(self):
+        """
+        Let each living agent make decisions.
+        """
+
+        for agent in self.agents:
+            if not agent.alive:
+                continue
+
+            previous_state = (
+                agent.state
+            )
+
+            try:
+                action = agent.choose_action()
+            except Exception as error:
+                action = "wander"
+
+                self.log_event(
+                    f"Agent #{agent.agent_id} "
+                    f"AI error: {error}"
+                )
+
+            agent.last_action = action
+            agent.last_decision = action
+
+            if previous_state != agent.state:
+                agent.behaviour_score += 0.1
+
+            self.total_decisions += 1
+
+    def run_combat_phase(self):
+        """
+        Find combat opportunities.
+        """
+
+        living_agents = [
+            agent
+            for agent in self.agents
+            if agent.alive
+        ]
+
+        for attacker in living_agents:
+            if not attacker.alive:
+                continue
+
+            if attacker.attack_cooldown > 0:
+                attacker.attack_cooldown -= 1
+
+            target = self.find_combat_target(
+                attacker
+            )
+
+            if target is None:
+                continue
+
+            distance = self.distance_between(
+                attacker,
+                target
+            )
+
+            if distance > attacker.attack_range:
+                continue
+
+            if attacker.attack_cooldown > 0:
+                continue
+
+            self.attack(
+                attacker,
+                target
+            )
+
+    def find_combat_target(
+        self,
+        attacker
+    ):
+        """
+        Find the best nearby enemy.
+        """
+
+        candidates = []
+
+        for other in self.agents:
+            if other is attacker:
+                continue
+
+            if not other.alive:
+                continue
+
+            if self.team_mode:
+                if (
+                    getattr(
+                        attacker,
+                        "team",
+                        None
+                    )
+                    ==
+                    getattr(
+                        other,
+                        "team",
+                        None
+                    )
+                ):
+                    continue
+
+            distance = self.distance_between(
+                attacker,
+                other
+            )
+
+            if distance > attacker.vision_range:
+                continue
+
+            candidates.append(
+                (
+                    distance,
+                    other
+                )
+            )
+
+        if not candidates:
+            return None
+
+        if attacker.personality == "aggressive":
+            candidates.sort(
+                key=lambda item: (
+                    item[1].health,
+                    item[0]
+                )
+            )
+
+        elif attacker.personality == "defensive":
+            candidates.sort(
+                key=lambda item: (
+                    -item[1].health,
+                    item[0]
+                )
+            )
+
+        elif attacker.personality == "explorer":
+            candidates.sort(
+                key=lambda item: (
+                    item[0],
+                    -item[1].health
+                )
+            )
+
+        else:
+            candidates.sort(
+                key=lambda item: (
+                    item[0],
+                    item[1].health
+                )
+            )
+
+        return candidates[0][1]
+
+    def attack(
+        self,
+        attacker,
+        target
+    ):
+        """
+        Execute an attack.
+        """
+
+        if not attacker.alive:
+            return
+
+        if not target.alive:
+            return
+
+        attacker.attacks += 1
+
+        attacker.attack_cooldown = random.randint(
+            8,
+            18
+        )
+
+        self.total_attacks += 1
+
+        distance = self.distance_between(
+            attacker,
+            target
+        )
+
+        distance_factor = max(
+            0.4,
+            1.0
+            - (
+                distance
+                / attacker.attack_range
+            )
+            * 0.35
+        )
+
+        chance = (
+            attacker.attack_accuracy
+            * distance_factor
+        )
+
+        if random.random() > chance:
+            self.log_event(
+                f"Agent #{attacker.agent_id} "
+                f"missed Agent #{target.agent_id}"
+            )
+
+            return
+
+        personality_modifier = 1.0
+
+        if attacker.personality == "aggressive":
+            personality_modifier = 1.25
+
+        elif attacker.personality == "defensive":
+            personality_modifier = 0.85
+
+        elif attacker.personality == "explorer":
+            personality_modifier = 0.9
+
+        damage = (
+            attacker.attack_damage
+            * personality_modifier
+        )
+
+        target_defence = getattr(
+            target,
+            "defence",
+            0.0
+        )
+
+        damage *= (
+            1.0
+            - target_defence
+        )
+
+        damage *= random.uniform(
+            0.8,
+            1.2
+        )
+
+        damage = max(
+            0.1,
+            damage
+        )
+
+        target.health -= damage
+
+        attacker.damage_dealt += damage
+
+        target.damage_taken += damage
+
+        attacker.successful_attacks += 1
+
+        attacker.combat_experience += (
+            damage * 0.05
+        )
+
+        attacker.combat_score += (
+            damage * 0.5
+        )
+
+        self.total_damage += damage
+
+        self.log_event(
+            f"Agent #{attacker.agent_id} "
+            f"hit Agent #{target.agent_id} "
+            f"for {damage:.1f}"
+        )
+
+        if target.health <= 0:
+            self.kill_agent(
+                attacker,
+                target
+            )
+
+    def kill_agent(
+        self,
+        attacker,
+        target
+    ):
+        """
+        Eliminate an agent and award points.
+        """
+
+        if not target.alive:
+            return
+
+        target.die(
+            f"killed by Agent #{attacker.agent_id}"
+        )
+
+        attacker.kills += 1
+
+        attacker.score += 100.0
+
+        attacker.combat_score += 100.0
+
+        attacker.combat_experience += 10.0
+
+        self.total_kills += 1
+        self.total_deaths += 1
+
+        self.log_event(
+            f"Agent #{attacker.agent_id} "
+            f"eliminated Agent #{target.agent_id}"
+        )
+
+    def run_resource_phase(self):
+        """
+        Handle agents collecting resources.
+        """
+
+        for agent in self.agents:
+            if not agent.alive:
+                continue
+
+            resource = self.find_best_resource(
+                agent
+            )
+
+            if resource is None:
+                continue
+
+            distance = resource.distance_to(
+                agent.x,
+                agent.y
+            )
+
+            collection_range = (
+                agent.size
+                + resource.radius
+                + 8
+            )
+
+            if distance > collection_range:
+                continue
+
+            consumed = self.world.consume_resource(
+                agent,
+                resource,
+                amount=5
+            )
+
+            if consumed <= 0:
+                continue
+
+            agent.resources_collected += consumed
+
+            agent.score += (
+                consumed * 0.5
+            )
+
+            agent.exploration_score += (
+                consumed * 0.1
+            )
+
+    def find_best_resource(
+        self,
+        agent
+    ):
+        """
+        Choose the resource that best matches
+        the agent's current needs.
+        """
+
+        best = None
+        best_value = -float("inf")
+
+        for resource in self.world.resources:
+            if not resource.active:
+                continue
+
+            distance = resource.distance_to(
+                agent.x,
+                agent.y
+            )
+
+            if distance > agent.vision_range:
+                continue
+
+            value = (
+                resource.get_ratio()
+                * agent.resource_priority
+            )
+
+            if resource.resource_type == "food":
+                if agent.hunger > 50:
+                    value += (
+                        agent.hunger / 100
+                    )
+
+            elif resource.resource_type == "energy":
+                if agent.energy < 50:
+                    value += (
+                        1
+                        - agent.energy / 100
+                    )
+
+            elif resource.resource_type == "water":
+                if agent.energy < 30:
+                    value += 0.3
+
+            value -= (
+                distance
+                / max(
+                    1,
+                    agent.vision_range
+                )
+            )
+
+            if value > best_value:
+                best_value = value
+                best = resource
+
+        return best
+
+    def update_survival(self):
+        """
+        Award survival points to living agents.
+        """
+
+        for agent in self.agents:
+            if not agent.alive:
+                continue
+
+            agent.survival_ticks += 1
+
+            agent.survival_score += 0.01
+
+            agent.score += 0.01
+
+    def update_scores(self):
+        """
+        Calculate each agent's overall score.
+        """
+
+        for agent in self.agents:
+            score = 0.0
+
+            score += (
+                agent.survival_score
+            )
+
+            score += (
+                agent.combat_score
+            )
+
+            score += (
+                agent.exploration_score
+            )
+
+            score += (
+                agent.behaviour_score
+            )
+
+            score += (
+                agent.kills * 50
+            )
+
+            score += (
+                agent.resources_collected
+                * 0.25
+            )
+
+            score -= (
+                agent.damage_taken
+                * 0.05
+            )
+
+            if agent.alive:
+                score += 10
+
+            agent.score = max(
+                0.0,
+                score
+            )
+
+    def update_rankings(self):
+        """
+        Rank agents by score.
+        """
+
+        if (
+            self.total_ticks
+            - self.last_rank_update
+            < self.rank_update_interval
+        ):
+            return
+
+        self.last_rank_update = (
+            self.total_ticks
+        )
+
+        ranked = sorted(
+            self.agents,
+            key=lambda agent: (
+                agent.score,
+                agent.alive
+            ),
+            reverse=True
+        )
+
+        for rank, agent in enumerate(
+            ranked,
+            start=1
+        ):
+            agent.rank = rank
+
+        if ranked:
+            self.best_agent = ranked[0]
+            self.best_score = (
+                ranked[0].score
+            )
+
+    def record_history(self):
+        """
+        Store historical simulation data.
+        """
+
+        population = self.get_population()
+
+        self.population_history.append(
+            population
+        )
+
+        self.score_history.append(
+            self.get_total_score()
+        )
+
+        if len(
+            self.population_history
+        ) > 1000:
+            self.population_history.pop(0)
+
+        if len(
+            self.score_history
+        ) > 1000:
+            self.score_history.pop(0)
+
+    def check_deaths(self):
+        """
+        Detect newly dead agents.
+        """
+
+        for agent in self.agents:
+            if (
+                not agent.alive
+                and not getattr(
+                    agent,
+                    "_death_registered",
+                    False
+                )
+            ):
+                agent._death_registered = True
+
+                self.log_event(
+                    f"Agent #{agent.agent_id} "
+                    f"is dead"
+                )
+
+    def check_winner(self):
+        """
+        Determine whether the round has ended.
+        """
+
+        alive = self.alive_agents()
+
+        if len(alive) == 0:
+            self.finish_round(
+                None,
+                "total elimination"
+            )
+
+            return
+
+        if len(alive) == 1:
+            self.finish_round(
+                alive[0],
+                "last agent standing"
+            )
+
+            return
+
+        if self.team_mode:
+            alive_teams = set(
+                getattr(
+                    agent,
+                    "team",
+                    None
+                )
+                for agent in alive
+            )
+
+            if len(alive_teams) == 1:
+                winning_team = next(
+                    iter(alive_teams)
+                )
+
+                team_agents = [
+                    agent
+                    for agent in alive
+                    if agent.team
+                    == winning_team
+                ]
+
+                if team_agents:
+                    winner = max(
+                        team_agents,
+                        key=lambda agent:
+                        agent.score
+                    )
+
+                    self.finish_round(
+                        winner,
+                        f"team {winning_team} victory"
+                    )
+
+    def check_round_timeout(self):
+        """
+        End a round if it runs too long.
+        """
+
+        if (
+            self.round_ticks
+            < self.maximum_round_ticks
+        ):
+            return
+
+        alive = self.alive_agents()
+
+        if not alive:
+            winner = None
+        else:
+            winner = max(
+                alive,
+                key=lambda agent:
+                agent.score
+            )
+
+        self.finish_round(
+            winner,
+            "round time limit"
+        )
+
+    def finish_round(
+        self,
+        winner,
+        reason
+    ):
+        """
+        Record the result of a round.
+        """
+
+        if self.finished:
+            return
+
+        self.winner = winner
+        self.winner_reason = reason
+
+        result = {
+            "round": self.round_number,
+            "ticks": self.round_ticks,
+            "winner": (
+                winner.agent_id
+                if winner is not None
+                else None
+            ),
+            "reason": reason,
+            "population": self.get_population(),
+            "score": (
+                winner.score
+                if winner is not None
+                else 0.0
+            ),
+        }
+
+        self.round_history.append(
+            result
+        )
+
+        if winner is not None:
+            self.log_event(
+                f"Round winner: "
+                f"Agent #{winner.agent_id} "
+                f"({reason})"
+            )
+        else:
+            self.log_event(
+                f"Round ended: {reason}"
+            )
+
+        self.finished = True
+        self.running = False
+
+    def start_new_round(self):
+        """
+        Start another round without creating
+        a completely new Simulation object.
+        """
+
+        self.round_number += 1
+
+        self.round_ticks = 0
+
+        self.finished = False
+
+        self.running = False
+
+        self.winner = None
+        self.winner_reason = None
+
+        self.total_deaths = 0
 
         self.world.reset()
 
         self.create_agents()
 
-        self.last_update_time = (
-            time.perf_counter()
+        self.log_event(
+            f"Round {self.round_number} started"
+        )
+
+    def set_speed(
+        self,
+        multiplier
+    ):
+        """
+        Set simulation speed.
+        """
+
+        try:
+            multiplier = float(
+                multiplier
+            )
+        except (
+            TypeError,
+            ValueError
+        ):
+            return
+
+        self.speed_multiplier = max(
+            0.1,
+            min(
+                100.0,
+                multiplier
+            )
         )
 
         self.log_event(
-            "Team warfare reset"
+            f"Simulation speed: "
+            f"{self.speed_multiplier}x"
         )
-
-    def set_speed(self, speed):
-        speed = float(speed)
-
-        speed = max(
-            self.min_speed,
-            min(
-                self.max_speed,
-                speed,
-            ),
-        )
-
-        self.simulation_speed = speed
-
-        return self.simulation_speed
 
     def increase_speed(self):
-        new_speed = (
-            self.simulation_speed * 2
-        )
+        """
+        Increase simulation speed.
+        """
 
-        if new_speed > self.max_speed:
-            new_speed = self.max_speed
-
-        self.simulation_speed = (
-            new_speed
-        )
-
-        return self.simulation_speed
-
-    def decrease_speed(self):
-        new_speed = (
-            self.simulation_speed / 2
-        )
-
-        if new_speed < self.min_speed:
-            new_speed = self.min_speed
-
-        self.simulation_speed = (
-            new_speed
-        )
-
-        return self.simulation_speed
-
-    def update(self):
-        update_start = (
-            time.perf_counter()
-        )
-
-        now = time.perf_counter()
-
-        delta = (
-            now
-            - self.last_update_time
-        )
-
-        self.last_update_time = now
-
-        if delta < 0:
-            delta = 0
-
-        if delta > 0.25:
-            delta = 0.25
-
-        self._performance_frames += 1
-
-        if (
-            self.running
-            and not self.finished
-        ):
-            self.accumulator += (
-                delta
-                * self.simulation_speed
-            )
-
-            ticks_this_update = 0
-
-            while (
-                self.accumulator
-                >= self.tick_interval
-                and ticks_this_update
-                < self.max_ticks_per_update
-            ):
-                self._run_tick()
-
-                self.accumulator -= (
-                    self.tick_interval
-                )
-
-                ticks_this_update += 1
-
-            if (
-                ticks_this_update
-                >= self.max_ticks_per_update
-            ):
-                self.accumulator = min(
-                    self.accumulator,
-                    self.tick_interval,
-                )
-
-        self.update_elapsed_time()
-
-        total_time = (
-            time.perf_counter()
-            - update_start
-        )
-
-        self.performance[
-            "last_update_ms"
-        ] = total_time * 1000
-
-        self.performance[
-            "total_ms"
-        ] = total_time * 1000
-
-        self.update_performance()
-
-    def _run_tick(self):
-        tick_start = (
-            time.perf_counter()
-        )
-
-        self.tick += 1
-        self.total_ticks += 1
-
-        self._performance_ticks += 1
-
-        alive_before = (
-            self.get_alive_count()
-        )
-
-        agent_start = (
-            time.perf_counter()
-        )
-
-        self.update_agents()
-
-        agent_time = (
-            time.perf_counter()
-            - agent_start
-        )
-
-        self.performance[
-            "agent_update_ms"
-        ] = agent_time * 1000
-
-        combat_start = (
-            time.perf_counter()
-        )
-
-        if self.combat_enabled:
-            self.process_combat()
-
-        combat_time = (
-            time.perf_counter()
-            - combat_start
-        )
-
-        self.performance[
-            "combat_ms"
-        ] = combat_time * 1000
-
-        world_start = (
-            time.perf_counter()
-        )
-
-        if self.resources_enabled:
-            self.update_resources()
-
-        self.update_world()
-
-        world_time = (
-            time.perf_counter()
-            - world_start
-        )
-
-        self.performance[
-            "world_ms"
-        ] = world_time * 1000
-
-        self.update_statistics()
-
-        alive_after = (
-            self.get_alive_count()
-        )
-
-        if alive_after < alive_before:
-            self.total_deaths += (
-                alive_before
-                - alive_after
-            )
-
-        self.check_finished()
-
-        self.record_history()
-
-        tick_time = (
-            time.perf_counter()
-            - tick_start
-        )
-
-        self.performance[
-            "total_ms"
-        ] = tick_time * 1000
-
-    def update_agents(self):
-        agents = self.world.agents
-
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            return
-
-        if not agents:
-            return
-
-        for agent in agents:
-            if not agent.is_alive():
-                continue
-
-            try:
-                agent.update(
-                    self.world
-                )
-            except Exception:
-                continue
-
-    def process_combat(self):
-        agents = self.world.agents
-
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            return
-
-        alive_agents = [
-            agent
-            for agent in agents
-            if agent.is_alive()
+        levels = [
+            0.5,
+            1.0,
+            2.0,
+            4.0,
+            8.0,
+            16.0,
+            32.0,
+            64.0,
+            100.0,
         ]
 
-        if len(alive_agents) < 2:
-            return
+        current = self.speed_multiplier
 
-        for attacker in alive_agents:
-            target = getattr(
-                attacker,
-                "target",
-                None,
-            )
+        for level in levels:
+            if level > current:
+                self.set_speed(level)
+                return
 
-            if target is None:
-                target = (
-                    attacker.choose_target(
-                        alive_agents
-                    )
-                )
-
-                if target is not None:
-                    attacker.target = (
-                        target
-                    )
-
-            if target is None:
-                continue
-
-            if target is attacker:
-                continue
-
-            if not target.is_alive():
-                attacker.target = None
-                continue
-
-            if not attacker.is_enemy(
-                target
-            ):
-                attacker.target = None
-                continue
-
-            if not self.can_attack(
-                attacker,
-                target,
-            ):
-                continue
-
-            if not attacker.should_attack(
-                target
-            ):
-                continue
-
-            damage = (
-                self.calculate_damage(
-                    attacker,
-                    target,
-                )
-            )
-
-            if damage <= 0:
-                continue
-
-            self.apply_damage(
-                attacker,
-                target,
-                damage,
-            )
-
-    def can_attack(
-        self,
-        attacker,
-        target,
-    ):
-        attack_range = getattr(
-            attacker,
-            "attack_range",
-            35.0,
+        self.set_speed(
+            levels[-1]
         )
 
+    def decrease_speed(self):
+        """
+        Decrease simulation speed.
+        """
+
+        levels = [
+            0.5,
+            1.0,
+            2.0,
+            4.0,
+            8.0,
+            16.0,
+            32.0,
+            64.0,
+            100.0,
+        ]
+
+        current = self.speed_multiplier
+
+        previous = levels[0]
+
+        for level in levels:
+            if level >= current:
+                self.set_speed(previous)
+                return
+
+            previous = level
+
+        self.set_speed(
+            levels[0]
+        )
+
+    def enable_team_mode(
+        self,
+        team_count=2
+    ):
+        """
+        Enable team-based simulation.
+        """
+
+        self.team_mode = True
+
+        self.team_count = max(
+            2,
+            int(team_count)
+        )
+
+        for index, agent in enumerate(
+            self.agents
+        ):
+            agent.team = (
+                index
+                % self.team_count
+            ) + 1
+
+        self.log_event(
+            f"Team mode enabled "
+            f"({self.team_count} teams)"
+        )
+
+    def disable_team_mode(self):
+        """
+        Disable team mode.
+        """
+
+        self.team_mode = False
+
+        for index, agent in enumerate(
+            self.agents
+        ):
+            agent.team = index + 1
+
+        self.log_event(
+            "Team mode disabled"
+        )
+
+    def add_agent(
+        self,
+        personality=None
+    ):
+        """
+        Dynamically add an agent.
+        """
+
+        new_id = 1
+
+        if self.agents:
+            new_id = max(
+                agent.agent_id
+                for agent in self.agents
+            ) + 1
+
+        margin = 60
+
+        x = random.uniform(
+            margin,
+            self.world.width - margin
+        )
+
+        y = random.uniform(
+            margin,
+            self.world.height - margin
+        )
+
+        agent = Agent(
+            agent_id=new_id,
+            x=x,
+            y=y,
+            personality=personality
+        )
+
+        self.configure_agent(
+            agent,
+            len(self.agents)
+        )
+
+        self.agents.append(
+            agent
+        )
+
+        self.world.agents = self.agents
+
+        self.agent_count = len(
+            self.agents
+        )
+
+        self.log_event(
+            f"Agent #{new_id} "
+            f"joined the arena"
+        )
+
+        return agent
+
+    def remove_agent(
+        self,
+        agent
+    ):
+        """
+        Remove an agent from the arena.
+        """
+
+        if agent not in self.agents:
+            return False
+
+        self.agents.remove(
+            agent
+        )
+
+        self.agent_count = len(
+            self.agents
+        )
+
+        self.world.agents = self.agents
+
+        self.log_event(
+            f"Agent #{agent.agent_id} "
+            f"removed"
+        )
+
+        return True
+
+    def alive_agents(self):
+        """
+        Return living agents.
+        """
+
+        return [
+            agent
+            for agent in self.agents
+            if agent.alive
+        ]
+
+    def dead_agents(self):
+        """
+        Return dead agents.
+        """
+
+        return [
+            agent
+            for agent in self.agents
+            if not agent.alive
+        ]
+
+    def get_population(self):
+        """
+        Return current living population.
+        """
+
+        return len(
+            self.alive_agents()
+        )
+
+    def get_total_score(self):
+        """
+        Return combined agent score.
+        """
+
+        return sum(
+            agent.score
+            for agent in self.agents
+        )
+
+    def get_average_score(self):
+        """
+        Return average agent score.
+        """
+
+        if not self.agents:
+            return 0.0
+
+        return (
+            self.get_total_score()
+            / len(self.agents)
+        )
+
+    def get_average_health(self):
+        """
+        Return average health of living agents.
+        """
+
+        alive = self.alive_agents()
+
+        if not alive:
+            return 0.0
+
+        return (
+            sum(
+                agent.health
+                for agent in alive
+            )
+            / len(alive)
+        )
+
+    def get_average_energy(self):
+        """
+        Return average energy.
+        """
+
+        alive = self.alive_agents()
+
+        if not alive:
+            return 0.0
+
+        return (
+            sum(
+                agent.energy
+                for agent in alive
+            )
+            / len(alive)
+        )
+
+    def get_average_hunger(self):
+        """
+        Return average hunger.
+        """
+
+        alive = self.alive_agents()
+
+        if not alive:
+            return 0.0
+
+        return (
+            sum(
+                agent.hunger
+                for agent in alive
+            )
+            / len(alive)
+        )
+
+    def get_leaderboard(self):
+        """
+        Return agents ordered by score.
+        """
+
+        return sorted(
+            self.agents,
+            key=lambda agent: (
+                agent.score,
+                agent.alive
+            ),
+            reverse=True
+        )
+
+    def get_team_scores(self):
+        """
+        Return total score for each team.
+        """
+
+        scores = {}
+
+        for agent in self.agents:
+            team = getattr(
+                agent,
+                "team",
+                None
+            )
+
+            if team not in scores:
+                scores[team] = 0.0
+
+            scores[team] += agent.score
+
+        return scores
+
+    def get_team_population(self):
+        """
+        Return living population by team.
+        """
+
+        populations = {}
+
+        for agent in self.alive_agents():
+            team = getattr(
+                agent,
+                "team",
+                None
+            )
+
+            if team not in populations:
+                populations[team] = 0
+
+            populations[team] += 1
+
+        return populations
+
+    def get_best_agent(self):
+        """
+        Return the highest-scoring agent.
+        """
+
+        if not self.agents:
+            return None
+
+        return max(
+            self.agents,
+            key=lambda agent:
+            agent.score
+        )
+
+    def get_worst_agent(self):
+        """
+        Return the lowest-scoring agent.
+        """
+
+        if not self.agents:
+            return None
+
+        return min(
+            self.agents,
+            key=lambda agent:
+            agent.score
+        )
+
+    def get_most_aggressive(self):
+        """
+        Find the agent with the highest
+        aggression attribute.
+        """
+
+        if not self.agents:
+            return None
+
+        return max(
+            self.agents,
+            key=lambda agent:
+            agent.aggression
+        )
+
+    def get_longest_survivor(self):
+        """
+        Find the agent that has survived
+        the longest.
+        """
+
+        if not self.agents:
+            return None
+
+        return max(
+            self.agents,
+            key=lambda agent:
+            agent.survival_ticks
+        )
+
+    def get_most_damaging_agent(self):
+        """
+        Find the agent that dealt the most damage.
+        """
+
+        if not self.agents:
+            return None
+
+        return max(
+            self.agents,
+            key=lambda agent:
+            agent.damage_dealt
+        )
+
+    def get_most_resourceful_agent(self):
+        """
+        Find the agent that collected the most
+        resources.
+        """
+
+        if not self.agents:
+            return None
+
+        return max(
+            self.agents,
+            key=lambda agent:
+            agent.resources_collected
+        )
+
+    def get_simulation_time(self):
+        """
+        Return real-world elapsed simulation time.
+        """
+
+        if self.start_time is None:
+            return 0.0
+
+        if self.running:
+            return (
+                time.time()
+                - self.start_time
+            )
+
+        return self.elapsed_real_time
+
+    def distance_between(
+        self,
+        first,
+        second
+    ):
+        """
+        Calculate distance between two agents.
+        """
+
         dx = (
-            target.x
-            - attacker.x
+            second.x
+            - first.x
         )
 
         dy = (
-            target.y
-            - attacker.y
-        )
-
-        distance_squared = (
-            dx * dx
-            + dy * dy
+            second.y
+            - first.y
         )
 
         return (
-            distance_squared
-            <= attack_range
-            * attack_range
-        )
+            dx * dx
+            + dy * dy
+        ) ** 0.5
 
-    def calculate_damage(
+    def log_event(
         self,
-        attacker,
-        target,
+        message
     ):
-        base_damage = random.uniform(
-            4.0,
-            9.0,
-        )
-
-        aggression = getattr(
-            attacker,
-            "aggression",
-            0.5,
-        )
-
-        intelligence = getattr(
-            attacker,
-            "intelligence",
-            0.5,
-        )
-
-        caution = getattr(
-            target,
-            "caution",
-            0.5,
-        )
-
-        health_factor = (
-            attacker.get_health_percent()
-        )
-
-        multiplier = (
-            0.75
-            + aggression * 0.5
-            + intelligence * 0.25
-            - caution * 0.2
-            + health_factor * 0.15
-        )
-
-        damage = (
-            base_damage
-            * multiplier
-        )
-
-        return max(
-            0.5,
-            damage,
-        )
-
-    def apply_damage(
-        self,
-        attacker,
-        target,
-        damage,
-    ):
-        if not target.is_alive():
-            return
-
-        if not attacker.is_enemy(
-            target
-        ):
-            return
-
-        old_health = (
-            target.health
-        )
-
-        actual_damage = (
-            target.take_damage(
-                damage,
-                attacker,
-            )
-        )
-
-        if actual_damage <= 0:
-            return
-
-        self.total_damage += (
-            actual_damage
-        )
-
-        self.total_attacks += 1
-
-        team = getattr(
-            attacker,
-            "team",
-            None,
-        )
-
-        if team in self.team_damage:
-            self.team_damage[
-                team
-            ] += actual_damage
-
-        if target.health <= 0:
-            self.handle_death(
-                target,
-                attacker,
-            )
-
-            attacker_name = getattr(
-                attacker,
-                "name",
-                f"Agent {getattr(attacker, 'agent_id', '?')}",
-            )
-
-            target_name = getattr(
-                target,
-                "name",
-                f"Agent {getattr(target, 'agent_id', '?')}",
-            )
-
-            self.log_event(
-                f"{attacker_name} "
-                f"({attacker.team}) "
-                f"eliminated "
-                f"{target_name} "
-                f"({target.team})"
-            )
-
-        elif (
-            self.total_attacks % 10
-            == 0
-        ):
-            self.log_event(
-                f"{attacker.team.upper()} "
-                f"dealt "
-                f"{actual_damage:.1f} "
-                f"damage"
-            )
-
-    def handle_death(
-        self,
-        agent,
-        killer=None,
-    ):
-        if agent.state == "dead":
-            return
-
-        agent.die(killer)
-
-        self.total_deaths += 1
-
-        if killer is not None:
-            killer_team = getattr(
-                killer,
-                "team",
-                None,
-            )
-
-            if killer_team in (
-                self.team_kills
-            ):
-                self.team_kills[
-                    killer_team
-                ] += 1
-
-                self.team_scores[
-                    killer_team
-                ] += 100
-
-    def update_resources(self):
-        resources = getattr(
-            self.world,
-            "resources",
-            [],
-        )
-
-        if not isinstance(
-            resources,
-            (list, tuple),
-        ):
-            return
-
-        for resource in resources:
-            try:
-                resource.update(
-                    self.tick
-                )
-            except TypeError:
-                try:
-                    resource.update()
-                except Exception:
-                    continue
-            except Exception:
-                continue
-
-    def update_world(self):
-        agents = self.world.agents
-
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            agents = self.agents
-
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            agents = []
-
-        self.world.agents = agents
-
-        try:
-            self.world.update(
-                agents
-            )
-        except TypeError:
-            try:
-                self.world.update(
-                    list(agents)
-                )
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    def update_statistics(self):
-        agents = self.world.agents
-
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            agents = []
-
-        self._last_agent_count = (
-            len(agents)
-        )
-
-        self._last_alive_count = (
-            self.get_alive_count()
-        )
-
-        if hasattr(
-            self.world,
-            "statistics",
-        ):
-            try:
-                self.world.statistics[
-                    "ticks"
-                ] = self.tick
-
-                self.world.statistics[
-                    "alive"
-                ] = self.get_alive_count()
-
-                self.world.statistics[
-                    "deaths"
-                ] = self.total_deaths
-
-                self.world.statistics[
-                    "damage"
-                ] = self.total_damage
-
-                self.world.statistics[
-                    "red"
-                ] = self.get_team_alive_count(
-                    "red"
-                )
-
-                self.world.statistics[
-                    "blue"
-                ] = self.get_team_alive_count(
-                    "blue"
-                )
-
-            except Exception:
-                pass
-
-    def update_elapsed_time(self):
-        if self.start_time is None:
-            self.elapsed_time = 0.0
-            return
-
-        self.elapsed_time = (
-            time.perf_counter()
-            - self.start_time
-        )
-
-    def update_performance(self):
-        now = time.perf_counter()
-
-        elapsed = (
-            now
-            - self._performance_time
-        )
-
-        if elapsed < 1.0:
-            return
-
-        self.performance[
-            "fps"
-        ] = (
-            self._performance_frames
-            / elapsed
-        )
-
-        self.performance[
-            "simulation_tps"
-        ] = (
-            self._performance_ticks
-            / elapsed
-        )
-
-        self._performance_frames = 0
-        self._performance_ticks = 0
-
-        self._performance_time = now
-
-    def check_finished(self):
-        if not self.team_mode:
-            self.check_standard_finished()
-            return
-
-        red_alive = (
-            self.get_team_alive_count(
-                "red"
-            )
-        )
-
-        blue_alive = (
-            self.get_team_alive_count(
-                "blue"
-            )
-        )
-
-        if red_alive > 0 and blue_alive > 0:
-            return
-
-        if red_alive > 0:
-            self.finish_team(
-                "red"
-            )
-            return
-
-        if blue_alive > 0:
-            self.finish_team(
-                "blue"
-            )
-            return
-
-        self.finished = True
-        self.running = False
-        self.paused = False
-        self.team_winner = None
-        self.winner = None
-
-        self.log_event(
-            "Both teams were eliminated"
-        )
-
-    def check_standard_finished(self):
-        alive_agents = (
-            self.get_alive_agents()
-        )
-
-        if len(alive_agents) > 1:
-            return
-
-        if len(alive_agents) == 1:
-            self.winner = (
-                alive_agents[0]
-            )
-        else:
-            self.winner = None
-
-        self.finished = True
-        self.running = False
-        self.paused = False
-
-    def finish_team(self, team):
-        self.team_winner = team
-
-        self.finished = True
-        self.running = False
-        self.paused = False
-
-        winner_agents = (
-            self.get_team_agents(
-                team
-            )
-        )
-
-        if winner_agents:
-            winner_agents.sort(
-                key=lambda agent: (
-                    getattr(
-                        agent,
-                        "score",
-                        0,
-                    )
-                    + getattr(
-                        agent,
-                        "kills",
-                        0,
-                    )
-                    * 100
-                ),
-                reverse=True,
-            )
-
-            self.winner = (
-                winner_agents[0]
-            )
-
-        self.log_event(
-            f"{team.upper()} TEAM WINS"
-        )
-
-    def record_history(self):
-        if self.tick % 30 != 0:
-            return
-
-        agents = self.world.agents
-
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            agents = []
-
-        snapshot = {
-            "tick": self.tick,
-            "alive": self.get_alive_count(),
-            "agents": len(agents),
-            "red": self.get_team_alive_count(
-                "red"
-            ),
-            "blue": self.get_team_alive_count(
-                "blue"
-            ),
-            "red_score": self.team_scores[
-                "red"
-            ],
-            "blue_score": self.team_scores[
-                "blue"
-            ],
-            "red_kills": self.team_kills[
-                "red"
-            ],
-            "blue_kills": self.team_kills[
-                "blue"
-            ],
-            "damage": self.total_damage,
-            "attacks": self.total_attacks,
-            "deaths": self.total_deaths,
-        }
-
-        self.history.append(
-            snapshot
-        )
-
-        if len(self.history) > 1000:
-            self.history.pop(0)
-
-    def log_event(self, message):
-        entry = {
-            "tick": self.tick,
-            "time": self.elapsed_time,
+        """
+        Record a simulation event.
+        """
+
+        event = {
+            "tick": self.total_ticks,
+            "round": self.round_number,
             "message": str(message),
         }
 
-        self.event_log.append(
-            entry
+        self.event_history.append(
+            event
         )
 
-        if len(self.event_log) > 500:
-            self.event_log.pop(0)
+        if len(
+            self.event_history
+        ) > self.event_limit:
+            self.event_history.pop(0)
 
-    def get_alive_agents(self):
-        agents = self.world.agents
+    def get_recent_events(
+        self,
+        count=20
+    ):
+        """
+        Return the most recent events.
+        """
 
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
+        if count <= 0:
             return []
 
-        return [
-            agent
-            for agent in agents
-            if agent.is_alive()
+        return self.event_history[
+            -count:
         ]
 
-    def get_alive_count(self):
-        return len(
-            self.get_alive_agents()
+    def clear_events(self):
+        """
+        Clear simulation event history.
+        """
+
+        self.event_history.clear()
+
+    def get_population_history(self):
+        """
+        Return a copy of population history.
+        """
+
+        return list(
+            self.population_history
         )
 
-    def get_dead_count(self):
-        agents = self.world.agents
+    def get_score_history(self):
+        """
+        Return a copy of score history.
+        """
 
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            return 0
-
-        return (
-            len(agents)
-            - self.get_alive_count()
+        return list(
+            self.score_history
         )
 
-    def get_agent_count(self):
-        agents = self.world.agents
+    def get_status(self):
+        """
+        Return a complete simulation status.
+        """
 
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            return 0
+        best = self.get_best_agent()
 
-        return len(agents)
-
-    def get_team_agents(self, team):
-        agents = self.world.agents
-
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            return []
-
-        return [
-            agent
-            for agent in agents
-            if getattr(
-                agent,
-                "team",
-                None,
-            ) == team
-        ]
-
-    def get_team_alive_agents(
-        self,
-        team,
-    ):
-        return [
-            agent
-            for agent in self.get_team_agents(
-                team
-            )
-            if agent.is_alive()
-        ]
-
-    def get_team_alive_count(
-        self,
-        team,
-    ):
-        return len(
-            self.get_team_alive_agents(
-                team
-            )
-        )
-
-    def get_team_counts(self):
         return {
-            "red": self.get_team_alive_count(
-                "red"
-            ),
-            "blue": self.get_team_alive_count(
-                "blue"
-            ),
-        }
-
-    def get_team_total_counts(self):
-        return {
-            "red": len(
-                self.get_team_agents(
-                    "red"
-                )
-            ),
-            "blue": len(
-                self.get_team_agents(
-                    "blue"
-                )
-            ),
-        }
-
-    def get_smallest_team(self):
-        counts = (
-            self.get_team_total_counts()
-        )
-
-        if counts["red"] <= counts[
-            "blue"
-        ]:
-            return "red"
-
-        return "blue"
-
-    def assign_teams(self):
-        agents = self.world.agents
-
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            return
-
-        red_count = 0
-        blue_count = 0
-
-        for agent in agents:
-            if red_count <= blue_count:
-                agent.set_team(
-                    "red"
-                )
-                red_count += 1
-            else:
-                agent.set_team(
-                    "blue"
-                )
-                blue_count += 1
-
-    def set_team_mode(
-        self,
-        enabled=True,
-    ):
-        self.team_mode = bool(
-            enabled
-        )
-
-        if self.team_mode:
-            self.assign_teams()
-
-    def get_team_score(self, team):
-        return self.team_scores.get(
-            team,
-            0,
-        )
-
-    def get_team_kills(self, team):
-        return self.team_kills.get(
-            team,
-            0,
-        )
-
-    def get_team_damage(self, team):
-        return self.team_damage.get(
-            team,
-            0.0,
-        )
-
-    def get_rankings(self):
-        agents = self.world.agents
-
-        if not isinstance(
-            agents,
-            (list, tuple),
-        ):
-            return []
-
-        agents = list(agents)
-
-        def score(agent):
-            return (
-                getattr(
-                    agent,
-                    "score",
-                    0,
-                )
-                + getattr(
-                    agent,
-                    "kills",
-                    0,
-                ) * 100
-                + getattr(
-                    agent,
-                    "health",
-                    0,
-                )
-            )
-
-        agents.sort(
-            key=score,
-            reverse=True,
-        )
-
-        return agents
-
-    def get_team_rankings(self, team):
-        agents = self.get_team_agents(
-            team
-        )
-
-        return sorted(
-            agents,
-            key=lambda agent: (
-                getattr(
-                    agent,
-                    "score",
-                    0,
-                )
-                + getattr(
-                    agent,
-                    "kills",
-                    0,
-                ) * 100
-            ),
-            reverse=True,
-        )
-
-    def get_team_winner(self):
-        return self.team_winner
-
-    def get_winner(self):
-        return self.winner
-
-    def get_speed(self):
-        return self.simulation_speed
-
-    def get_fps(self):
-        return self.performance[
-            "fps"
-        ]
-
-    def get_simulation_tps(self):
-        return self.performance[
-            "simulation_tps"
-        ]
-
-    def get_performance(self):
-        return dict(
-            self.performance
-        )
-
-    def get_statistics(self):
-        return {
-            "version": VERSION,
-            "tick": self.tick,
-            "round": self.round,
+            "version": self.VERSION,
             "running": self.running,
             "paused": self.paused,
             "finished": self.finished,
-            "speed": self.simulation_speed,
-            "agents": self.get_agent_count(),
-            "alive": self.get_alive_count(),
-            "dead": self.get_dead_count(),
-            "red_alive": self.get_team_alive_count(
-                "red"
+            "round": self.round_number,
+            "tick": self.total_ticks,
+            "round_ticks": self.round_ticks,
+            "population": self.get_population(),
+            "agents": len(self.agents),
+            "dead": len(
+                self.dead_agents()
             ),
-            "blue_alive": self.get_team_alive_count(
-                "blue"
-            ),
-            "red_score": self.team_scores[
-                "red"
-            ],
-            "blue_score": self.team_scores[
-                "blue"
-            ],
-            "red_kills": self.team_kills[
-                "red"
-            ],
-            "blue_kills": self.team_kills[
-                "blue"
-            ],
-            "red_damage": self.team_damage[
-                "red"
-            ],
-            "blue_damage": self.team_damage[
-                "blue"
-            ],
+            "speed": self.speed_multiplier,
+            "team_mode": self.team_mode,
+            "teams": self.team_count,
+            "combat": self.combat_enabled,
+            "resources": self.resources_enabled,
             "attacks": self.total_attacks,
-            "damage": self.total_damage,
-            "deaths": self.total_deaths,
-            "elapsed_time": self.elapsed_time,
-            "fps": self.get_fps(),
-            "simulation_tps": self.get_simulation_tps(),
+            "damage": round(
+                self.total_damage,
+                1
+            ),
+            "kills": self.total_kills,
+            "decisions": self.total_decisions,
+            "average_health": round(
+                self.get_average_health(),
+                1
+            ),
+            "average_energy": round(
+                self.get_average_energy(),
+                1
+            ),
+            "average_hunger": round(
+                self.get_average_hunger(),
+                1
+            ),
+            "best_agent": (
+                best.agent_id
+                if best is not None
+                else None
+            ),
+            "best_score": round(
+                self.best_score,
+                1
+            ),
+            "winner": (
+                self.winner.agent_id
+                if self.winner is not None
+                else None
+            ),
+            "winner_reason":
+                self.winner_reason,
+        }
+
+    def get_agent_status(
+        self,
+        agent
+    ):
+        """
+        Return detailed information about
+        one agent.
+        """
+
+        return {
+            "id": agent.agent_id,
+            "alive": agent.alive,
+            "team": getattr(
+                agent,
+                "team",
+                None
+            ),
+            "personality": agent.personality,
+            "state": agent.state,
+            "action": getattr(
+                agent,
+                "last_action",
+                None
+            ),
+            "rank": agent.rank,
+            "score": round(
+                agent.score,
+                2
+            ),
+            "health": round(
+                agent.health,
+                1
+            ),
+            "energy": round(
+                agent.energy,
+                1
+            ),
+            "hunger": round(
+                agent.hunger,
+                1
+            ),
+            "kills": agent.kills,
+            "attacks": agent.attacks,
+            "damage_dealt": round(
+                agent.damage_dealt,
+                1
+            ),
+            "damage_taken": round(
+                agent.damage_taken,
+                1
+            ),
+            "resources": round(
+                agent.resources_collected,
+                1
+            ),
+            "survival_ticks":
+                agent.survival_ticks,
+            "x": round(
+                agent.x,
+                1
+            ),
+            "y": round(
+                agent.y,
+                1
+            ),
         }
 
     def export_results(self):
+        """
+        Return all important simulation results
+        in a serialisable dictionary.
+        """
+
         return {
-            "version": VERSION,
-            "tick": self.tick,
-            "round": self.round,
-            "winner": (
-                getattr(
-                    self.winner,
-                    "name",
-                    None,
-                )
-                if self.winner
-                else None
-            ),
-            "team_winner": (
-                self.team_winner
-            ),
-            "agents": self.get_agent_count(),
-            "alive": self.get_alive_count(),
-            "dead": self.get_dead_count(),
-            "red_alive": self.get_team_alive_count(
-                "red"
-            ),
-            "blue_alive": self.get_team_alive_count(
-                "blue"
-            ),
-            "red_score": self.team_scores[
-                "red"
+            "simulation": {
+                "version": self.VERSION,
+                "round": self.round_number,
+                "total_ticks": self.total_ticks,
+                "finished": self.finished,
+                "winner": (
+                    self.winner.agent_id
+                    if self.winner
+                    else None
+                ),
+                "winner_reason":
+                    self.winner_reason,
+            },
+            "statistics": {
+                "population":
+                    self.get_population(),
+                "deaths":
+                    self.total_deaths,
+                "kills":
+                    self.total_kills,
+                "attacks":
+                    self.total_attacks,
+                "damage":
+                    self.total_damage,
+                "decisions":
+                    self.total_decisions,
+                "total_score":
+                    self.get_total_score(),
+                "average_score":
+                    self.get_average_score(),
+            },
+            "agents": [
+                self.get_agent_status(agent)
+                for agent in self.agents
             ],
-            "blue_score": self.team_scores[
-                "blue"
-            ],
-            "red_kills": self.team_kills[
-                "red"
-            ],
-            "blue_kills": self.team_kills[
-                "blue"
-            ],
-            "red_damage": self.team_damage[
-                "red"
-            ],
-            "blue_damage": self.team_damage[
-                "blue"
-            ],
-            "attacks": self.total_attacks,
-            "damage": self.total_damage,
-            "deaths": self.total_deaths,
-            "elapsed_time": self.elapsed_time,
-            "history": list(
-                self.history
-            ),
+            "teams":
+                self.get_team_scores(),
+            "round_history":
+                list(self.round_history),
         }
-
-    def get_event_log(self):
-        return list(
-            self.event_log
-        )
-
-    def clear_event_log(self):
-        self.event_log.clear()
-
-    def get_version(self):
-        return VERSION
 
     def __repr__(self):
         return (
-            f"<Simulation "
-            f"v{VERSION} "
-            f"tick={self.tick} "
-            f"agents={self.get_agent_count()} "
-            f"alive={self.get_alive_count()} "
-            f"red={self.get_team_alive_count('red')} "
-            f"blue={self.get_team_alive_count('blue')} "
-            f"speed={self.simulation_speed}x>"
+            f"Simulation("
+            f"version={self.VERSION}, "
+            f"tick={self.total_ticks}, "
+            f"population="
+            f"{self.get_population()}, "
+            f"running="
+            f"{self.running}"
+            f")"
         )

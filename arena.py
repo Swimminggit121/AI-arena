@@ -1,558 +1,1586 @@
+import math
+import time
 import tkinter as tk
-from tkinter import ttk
 
 
-VERSION = "0.5.2"
+class Arena:
+    VERSION = "0.4.1"
 
-
-class Arena(tk.Frame):
-    def __init__(self, parent, simulation, width=900, height=600):
-        super().__init__(parent, bg="#111111")
-
+    def __init__(self, root, simulation):
+        self.root = root
         self.simulation = simulation
-        self.width = width
-        self.height = height
 
-        self.show_targets = True
+        self.canvas_width = 900
+        self.canvas_height = 600
+
+        self.background = "#0f1217"
+        self.grid_color = "#191e26"
+        self.border_color = "#303742"
+
+        self.agent_colors = {
+            "aggressive": "#e05a5a",
+            "defensive": "#5a9ee0",
+            "explorer": "#65c47a",
+            "balanced": "#c49a5a",
+        }
+
+        self.team_colors = [
+            "#5aa9e6",
+            "#e06c75",
+            "#98c379",
+            "#c678dd",
+            "#e5c07b",
+            "#56b6c2",
+            "#d19a66",
+            "#abb2bf",
+        ]
+
+        self.state_colors = {
+            "idle": "#aaaaaa",
+            "wandering": "#8fbc8f",
+            "exploring": "#61afef",
+            "investigating": "#c678dd",
+            "chasing": "#e06c75",
+            "fleeing": "#e5c07b",
+            "resting": "#56b6c2",
+            "dead": "#555555",
+        }
+
+        self.show_grid = True
+        self.show_labels = True
         self.show_health = True
         self.show_energy = True
+        self.show_targets = True
+        self.show_vision = False
+        self.show_resources = True
+        self.show_obstacles = True
+        self.show_effects = True
+        self.show_spawn_points = False
 
         self.selected_agent = None
+        self.hovered_agent = None
+
+        self.last_draw_time = 0.0
+        self.last_tick = -1
         self.last_state_signature = None
 
+        self.target_fps = 30
+        self.frame_interval = 1.0 / self.target_fps
+
+        self.frame_count = 0
+        self.fps = 0.0
+        self.fps_timer = time.perf_counter()
+
+        self.attack_effects = []
+
         self.canvas = tk.Canvas(
-            self,
-            width=self.width,
-            height=self.height,
-            bg="#151515",
-            highlightthickness=0
-        )
-        self.canvas.pack(fill="both", expand=True)
-
-        self.canvas.bind("<Button-1>", self.on_click)
-        self.canvas.bind("<Button-3>", self.on_right_click)
-
-        self.context_menu = tk.Menu(self, tearoff=0)
-        self.context_menu.add_checkbutton(
-            label="Show Targets",
-            command=self.toggle_targets
-        )
-        self.context_menu.add_checkbutton(
-            label="Show Health Bars",
-            command=self.toggle_health
-        )
-        self.context_menu.add_checkbutton(
-            label="Show Energy Bars",
-            command=self.toggle_energy
+            root,
+            width=self.canvas_width,
+            height=self.canvas_height,
+            background=self.background,
+            highlightthickness=0,
+            bd=0,
         )
 
-        self.canvas.bind("<Configure>", self.on_resize)
+        self.canvas.pack(
+            padx=20,
+            pady=(5, 10),
+            fill="both",
+            expand=True,
+        )
 
-        self.render()
+        self.canvas.bind(
+            "<Button-1>",
+            self.on_canvas_click,
+        )
 
-    # ---------------------------------------------------------
-    # RESIZE
-    # ---------------------------------------------------------
+        self.canvas.bind(
+            "<Motion>",
+            self.on_canvas_motion,
+        )
 
-    def on_resize(self, event):
-        if event.width > 100:
-            self.width = event.width
+        self.canvas.bind(
+            "<Leave>",
+            self.on_canvas_leave,
+        )
 
-        if event.height > 100:
-            self.height = event.height
+        self.canvas.bind(
+            "<Button-3>",
+            self.show_context_menu,
+        )
 
-        self.render()
+        self.root.bind(
+            "<KeyPress>",
+            self.on_key_press,
+        )
 
-    # ---------------------------------------------------------
-    # UPDATE / RENDER
-    # ---------------------------------------------------------
+        self.root.bind(
+            "<Left>",
+            lambda event: self.select_previous_agent(),
+        )
 
-    def render(self):
+        self.root.bind(
+            "<Right>",
+            lambda event: self.select_next_agent(),
+        )
+
+        self.root.bind(
+            "<Up>",
+            lambda event: self.change_speed(1),
+        )
+
+        self.root.bind(
+            "<Down>",
+            lambda event: self.change_speed(-1),
+        )
+
+        self.context_menu = None
+
+    def draw(self, force=False):
+        now = time.perf_counter()
+
+        if not force:
+            if now - self.last_draw_time < self.frame_interval:
+                return
+
+        self.last_draw_time = now
+
+        world = getattr(self.simulation, "world", None)
+
+        if world is None:
+            return
+
+        agents = getattr(world, "agents", None)
+
+        if agents is None:
+            agents = getattr(
+                self.simulation,
+                "agents",
+                [],
+            )
+
+        agents = list(agents)
+
+        tick = getattr(
+            world,
+            "tick",
+            0,
+        )
+
+        signature = self.build_state_signature(
+            agents,
+            tick,
+        )
+
+        if (
+            not force
+            and signature == self.last_state_signature
+        ):
+            self.update_fps()
+            return
+
+        self.last_state_signature = signature
+        self.last_tick = tick
+
         self.canvas.delete("all")
 
         self.draw_background()
         self.draw_grid()
-        self.draw_agents()
-        self.draw_targets()
-        self.draw_selected_agent()
-        self.draw_overlay()
+
+        if self.show_obstacles:
+            self.draw_obstacles(world)
+
+        if self.show_resources:
+            self.draw_resources(world)
+
+        if self.show_spawn_points:
+            self.draw_spawn_points(world)
+
+        if self.show_targets:
+            self.draw_targets(agents)
+
+        if self.show_vision:
+            self.draw_vision(agents)
+
+        self.draw_agents(agents)
+
+        if self.show_effects:
+            self.draw_attack_effects()
+
+        self.draw_overlay(agents)
+
+        self.update_fps()
+
+    def build_state_signature(self, agents, tick):
+        parts = [
+            tick,
+            len(agents),
+        ]
+
+        for agent in agents:
+            parts.append(
+                (
+                    id(agent),
+                    self.value(
+                        agent,
+                        "x",
+                        0,
+                    ),
+                    self.value(
+                        agent,
+                        "y",
+                        0,
+                    ),
+                    self.value(
+                        agent,
+                        "health",
+                        0,
+                    ),
+                    self.value(
+                        agent,
+                        "energy",
+                        0,
+                    ),
+                    self.value(
+                        agent,
+                        "state",
+                        "",
+                    ),
+                    self.value(
+                        agent,
+                        "dead",
+                        False,
+                    ),
+                )
+            )
+
+        return tuple(parts)
 
     def draw_background(self):
-        self.canvas.configure(bg="#151515")
+        self.canvas.create_rectangle(
+            0,
+            0,
+            self.canvas.winfo_width(),
+            self.canvas.winfo_height(),
+            fill=self.background,
+            outline="",
+        )
 
     def draw_grid(self):
+        if not self.show_grid:
+            return
+
+        width = self.canvas.winfo_width()
+        height = self.canvas.winfo_height()
+
         spacing = 50
 
-        for x in range(0, self.width, spacing):
+        for x in range(0, width, spacing):
             self.canvas.create_line(
                 x,
                 0,
                 x,
-                self.height,
-                fill="#202020"
+                height,
+                fill=self.grid_color,
             )
 
-        for y in range(0, self.height, spacing):
+        for y in range(0, height, spacing):
             self.canvas.create_line(
                 0,
                 y,
-                self.width,
+                width,
                 y,
-                fill="#202020"
+                fill=self.grid_color,
             )
 
-    # ---------------------------------------------------------
-    # AGENTS
-    # ---------------------------------------------------------
+        self.canvas.create_rectangle(
+            1,
+            1,
+            width - 1,
+            height - 1,
+            outline=self.border_color,
+            width=2,
+        )
 
-    def draw_agents(self):
-        agents = getattr(self.simulation, "agents", [])
+    def draw_obstacles(self, world):
+        obstacles = getattr(
+            world,
+            "obstacles",
+            [],
+        )
 
-        for agent in agents:
-            if not getattr(agent, "alive", True):
+        for obstacle in obstacles:
+            x = self.value(
+                obstacle,
+                "x",
+                0,
+            )
+
+            y = self.value(
+                obstacle,
+                "y",
+                0,
+            )
+
+            width = self.value(
+                obstacle,
+                "width",
+                0,
+            )
+
+            height = self.value(
+                obstacle,
+                "height",
+                0,
+            )
+
+            x1, y1 = self.world_to_canvas(
+                x,
+                y,
+            )
+
+            x2, y2 = self.world_to_canvas(
+                x + width,
+                y + height,
+            )
+
+            self.canvas.create_rectangle(
+                x1,
+                y1,
+                x2,
+                y2,
+                fill="#242a33",
+                outline="#39414d",
+            )
+
+    def draw_resources(self, world):
+        resources = getattr(
+            world,
+            "resources",
+            [],
+        )
+
+        for resource in resources:
+            active = self.value(
+                resource,
+                "active",
+                True,
+            )
+
+            if callable(active):
+                try:
+                    active = active()
+                except Exception:
+                    active = True
+
+            if not active:
                 continue
 
-            x = getattr(agent, "x", 0)
-            y = getattr(agent, "y", 0)
+            x = self.value(
+                resource,
+                "x",
+                0,
+            )
 
-            radius = getattr(agent, "radius", 10)
+            y = self.value(
+                resource,
+                "y",
+                0,
+            )
 
-            color = self.get_agent_color(agent)
+            amount = self.value(
+                resource,
+                "amount",
+                1,
+            )
+
+            resource_type = self.value(
+                resource,
+                "resource_type",
+                self.value(
+                    resource,
+                    "type",
+                    "food",
+                ),
+            )
+
+            resource_colors = {
+                "food": "#7acb88",
+                "energy": "#e5c07b",
+                "water": "#61afef",
+            }
+
+            color = resource_colors.get(
+                resource_type,
+                "#cccccc",
+            )
+
+            radius = 3 + min(
+                5,
+                max(
+                    0,
+                    float(amount) / 20,
+                ),
+            )
+
+            cx, cy = self.world_to_canvas(
+                x,
+                y,
+            )
 
             self.canvas.create_oval(
-                x - radius,
-                y - radius,
-                x + radius,
-                y + radius,
+                cx - radius,
+                cy - radius,
+                cx + radius,
+                cy + radius,
                 fill=color,
-                outline="#ffffff",
-                width=1
+                outline="",
             )
 
-            # Agent ID
-            agent_id = getattr(agent, "agent_id", None)
+    def draw_spawn_points(self, world):
+        points = getattr(
+            world,
+            "spawn_points",
+            [],
+        )
 
-            if agent_id is None:
-                agent_id = getattr(agent, "id", "?")
+        for point in points:
+            if isinstance(point, (tuple, list)):
+                if len(point) < 2:
+                    continue
 
-            self.canvas.create_text(
+                x = point[0]
+                y = point[1]
+
+            else:
+                x = self.value(
+                    point,
+                    "x",
+                    0,
+                )
+
+                y = self.value(
+                    point,
+                    "y",
+                    0,
+                )
+
+            cx, cy = self.world_to_canvas(
                 x,
-                y - radius - 9,
-                text=str(agent_id),
-                fill="#ffffff",
-                font=("Segoe UI", 8, "bold")
+                y,
             )
 
-            # Health bar
-            if self.show_health:
-                self.draw_health_bar(agent, x, y, radius)
+            self.canvas.create_oval(
+                cx - 7,
+                cy - 7,
+                cx + 7,
+                cy + 7,
+                outline="#555d68",
+            )
 
-            # Energy bar
-            if self.show_energy:
-                self.draw_energy_bar(agent, x, y, radius)
+            self.canvas.create_line(
+                cx - 4,
+                cy,
+                cx + 4,
+                cy,
+                fill="#555d68",
+            )
 
-    def get_agent_color(self, agent):
-        team = getattr(agent, "team", "red")
+            self.canvas.create_line(
+                cx,
+                cy - 4,
+                cx,
+                cy + 4,
+                fill="#555d68",
+            )
 
-        if isinstance(team, str):
-            team = team.lower()
-
-            if team == "red":
-                return "#e06c75"
-
-            if team == "blue":
-                return "#5a9ee0"
-
-        return "#bbbbbb"
-
-    # ---------------------------------------------------------
-    # HEALTH / ENERGY
-    # ---------------------------------------------------------
-
-    def draw_health_bar(self, agent, x, y, radius):
-        health = getattr(agent, "health", 0)
-        max_health = getattr(agent, "max_health", 100)
-
-        if max_health <= 0:
-            return
-
-        percentage = max(0, min(1, health / max_health))
-
-        bar_width = 28
-        bar_height = 4
-
-        left = x - bar_width / 2
-        top = y + radius + 4
-
-        self.canvas.create_rectangle(
-            left,
-            top,
-            left + bar_width,
-            top + bar_height,
-            fill="#333333",
-            outline=""
-        )
-
-        self.canvas.create_rectangle(
-            left,
-            top,
-            left + bar_width * percentage,
-            top + bar_height,
-            fill="#6bcf73",
-            outline=""
-        )
-
-    def draw_energy_bar(self, agent, x, y, radius):
-        energy = getattr(agent, "energy", 0)
-        max_energy = getattr(agent, "max_energy", 100)
-
-        if max_energy <= 0:
-            return
-
-        percentage = max(0, min(1, energy / max_energy))
-
-        bar_width = 28
-        bar_height = 3
-
-        left = x - bar_width / 2
-        top = y + radius + 10
-
-        self.canvas.create_rectangle(
-            left,
-            top,
-            left + bar_width,
-            top + bar_height,
-            fill="#333333",
-            outline=""
-        )
-
-        self.canvas.create_rectangle(
-            left,
-            top,
-            left + bar_width * percentage,
-            top + bar_height,
-            fill="#d6b65a",
-            outline=""
-        )
-
-    # ---------------------------------------------------------
-    # TARGETS
-    # ---------------------------------------------------------
-
-    def draw_targets(self):
-        if not self.show_targets:
-            return
-
-        agents = getattr(self.simulation, "agents", [])
-
+    def draw_targets(self, agents):
         for agent in agents:
-            if not getattr(agent, "alive", True):
+            if self.is_dead(agent):
                 continue
 
-            target = getattr(agent, "target", None)
+            target = self.value(
+                agent,
+                "target",
+                None,
+            )
 
             if target is None:
                 continue
 
-            if not getattr(target, "alive", True):
+            if self.is_dead(target):
                 continue
 
-            x1 = getattr(agent, "x", 0)
-            y1 = getattr(agent, "y", 0)
+            ax = self.value(
+                agent,
+                "x",
+                0,
+            )
 
-            x2 = getattr(target, "x", 0)
-            y2 = getattr(target, "y", 0)
+            ay = self.value(
+                agent,
+                "y",
+                0,
+            )
+
+            tx = self.value(
+                target,
+                "x",
+                0,
+            )
+
+            ty = self.value(
+                target,
+                "y",
+                0,
+            )
+
+            x1, y1 = self.world_to_canvas(
+                ax,
+                ay,
+            )
+
+            x2, y2 = self.world_to_canvas(
+                tx,
+                ty,
+            )
 
             self.canvas.create_line(
                 x1,
                 y1,
                 x2,
                 y2,
-                fill="#555555",
-                dash=(3, 5),
-                width=1
+                fill="#3b414b",
+                width=1,
+                dash=(4, 5),
             )
 
-    # ---------------------------------------------------------
-    # SELECTED AGENT
-    # ---------------------------------------------------------
+    def draw_vision(self, agents):
+        for agent in agents:
+            if self.is_dead(agent):
+                continue
 
-    def draw_selected_agent(self):
-        if self.selected_agent is None:
-            return
+            vision = self.value(
+                agent,
+                "vision_range",
+                self.value(
+                    agent,
+                    "vision",
+                    0,
+                ),
+            )
 
-        agent = self.selected_agent
+            if vision <= 0:
+                continue
 
-        if not getattr(agent, "alive", True):
-            return
+            x = self.value(
+                agent,
+                "x",
+                0,
+            )
 
-        x = getattr(agent, "x", 0)
-        y = getattr(agent, "y", 0)
-        radius = getattr(agent, "radius", 10)
+            y = self.value(
+                agent,
+                "y",
+                0,
+            )
 
-        self.canvas.create_oval(
-            x - radius - 5,
-            y - radius - 5,
-            x + radius + 5,
-            y + radius + 5,
-            outline="#ffffff",
-            width=2
+            x1, y1 = self.world_to_canvas(
+                x - vision,
+                y - vision,
+            )
+
+            x2, y2 = self.world_to_canvas(
+                x + vision,
+                y + vision,
+            )
+
+            self.canvas.create_oval(
+                x1,
+                y1,
+                x2,
+                y2,
+                outline="#2b313a",
+                dash=(3, 6),
+            )
+
+    def draw_agents(self, agents):
+        for agent in agents:
+            self.draw_agent(
+                agent
+            )
+
+    def draw_agent(self, agent):
+        x = self.value(
+            agent,
+            "x",
+            0,
         )
 
-        self.draw_agent_information(agent)
+        y = self.value(
+            agent,
+            "y",
+            0,
+        )
 
-    def draw_agent_information(self, agent):
-        panel_width = 230
-        panel_height = 190
+        cx, cy = self.world_to_canvas(
+            x,
+            y,
+        )
 
-        x1 = 15
-        y1 = 15
-        x2 = x1 + panel_width
-        y2 = y1 + panel_height
+        radius = self.value(
+            agent,
+            "radius",
+            9,
+        )
+
+        if radius <= 0:
+            radius = 9
+
+        dead = self.is_dead(
+            agent
+        )
+
+        if dead:
+            color = "#444444"
+        else:
+            color = self.get_agent_color(
+                agent
+            )
+
+        outline = "#ffffff"
+
+        if agent is self.selected_agent:
+            outline = "#ffffff"
+            outline_width = 3
+
+            self.canvas.create_oval(
+                cx - radius - 5,
+                cy - radius - 5,
+                cx + radius + 5,
+                cy + radius + 5,
+                outline="#ffffff",
+                width=2,
+            )
+
+        elif agent is self.hovered_agent:
+            outline = "#dddddd"
+            outline_width = 2
+
+        else:
+            outline_width = 1
+
+        self.canvas.create_oval(
+            cx - radius,
+            cy - radius,
+            cx + radius,
+            cy + radius,
+            fill=color,
+            outline=outline,
+            width=outline_width,
+        )
+
+        if not dead:
+            self.draw_direction(
+                agent,
+                cx,
+                cy,
+                radius,
+            )
+
+        if self.show_health and not dead:
+            self.draw_bar(
+                cx,
+                cy + radius + 4,
+                radius * 2,
+                3,
+                self.value(
+                    agent,
+                    "health",
+                    0,
+                ),
+                "#55cc88",
+            )
+
+        if self.show_energy and not dead:
+            self.draw_bar(
+                cx,
+                cy + radius + 9,
+                radius * 2,
+                2,
+                self.value(
+                    agent,
+                    "energy",
+                    0,
+                ),
+                "#e5c07b",
+            )
+
+        if self.show_labels:
+            self.draw_agent_label(
+                agent,
+                cx,
+                cy,
+                radius,
+            )
+
+    def draw_direction(
+        self,
+        agent,
+        cx,
+        cy,
+        radius,
+    ):
+        direction = self.value(
+            agent,
+            "direction",
+            0,
+        )
+
+        if isinstance(direction, (tuple, list)):
+            if len(direction) >= 2:
+                dx = float(direction[0])
+                dy = float(direction[1])
+
+                length = math.sqrt(
+                    dx * dx + dy * dy
+                )
+
+                if length > 0:
+                    dx /= length
+                    dy /= length
+
+                    self.canvas.create_line(
+                        cx,
+                        cy,
+                        cx + dx * radius * 1.4,
+                        cy + dy * radius * 1.4,
+                        fill="#ffffff",
+                        width=2,
+                    )
+
+                return
+
+        try:
+            angle = float(direction)
+
+        except Exception:
+            angle = 0
+
+        dx = math.cos(angle)
+        dy = math.sin(angle)
+
+        self.canvas.create_line(
+            cx,
+            cy,
+            cx + dx * radius * 1.4,
+            cy + dy * radius * 1.4,
+            fill="#ffffff",
+            width=2,
+        )
+
+    def draw_bar(
+        self,
+        x,
+        y,
+        width,
+        height,
+        value,
+        fill,
+    ):
+        try:
+            ratio = float(value) / 100.0
+
+        except Exception:
+            ratio = 0
+
+        ratio = max(
+            0,
+            min(
+                1,
+                ratio,
+            ),
+        )
+
+        self.canvas.create_rectangle(
+            x - width / 2,
+            y,
+            x + width / 2,
+            y + height,
+            fill="#242a33",
+            outline="",
+        )
+
+        if ratio > 0:
+            self.canvas.create_rectangle(
+                x - width / 2,
+                y,
+                x - width / 2 + width * ratio,
+                y + height,
+                fill=fill,
+                outline="",
+            )
+
+    def draw_agent_label(
+        self,
+        agent,
+        cx,
+        cy,
+        radius,
+    ):
+        name = self.value(
+            agent,
+            "name",
+            f"Agent {self.value(agent, 'id', '?')}",
+        )
+
+        personality = self.value(
+            agent,
+            "personality",
+            "",
+        )
+
+        team = self.value(
+            agent,
+            "team",
+            None,
+        )
+
+        if team is not None:
+            text = f"{name}  T{team}"
+
+        else:
+            text = str(name)
+
+        if personality:
+            text += f"  [{personality}]"
+
+        self.canvas.create_text(
+            cx,
+            cy - radius - 10,
+            text=text,
+            fill="#b7bdc7",
+            font=("Arial", 8),
+            anchor="s",
+        )
+
+    def draw_attack_effects(self):
+        now = time.perf_counter()
+
+        active_effects = []
+
+        for effect in self.attack_effects:
+            start = effect["time"]
+            duration = effect["duration"]
+
+            elapsed = now - start
+
+            if elapsed >= duration:
+                continue
+
+            progress = elapsed / duration
+
+            x = effect["x"]
+            y = effect["y"]
+
+            radius = 5 + progress * 14
+
+            cx, cy = self.world_to_canvas(
+                x,
+                y,
+            )
+
+            self.canvas.create_oval(
+                cx - radius,
+                cy - radius,
+                cx + radius,
+                cy + radius,
+                outline="#e5c07b",
+                width=2,
+            )
+
+            active_effects.append(
+                effect
+            )
+
+        self.attack_effects = active_effects
+
+    def draw_overlay(self, agents):
+        width = self.canvas.winfo_width()
+
+        alive = sum(
+            1
+            for agent in agents
+            if not self.is_dead(agent)
+        )
+
+        total = len(agents)
+
+        text = (
+            f"Agents: {alive}/{total}"
+            f"    Tick: {getattr(self.simulation.world, 'tick', 0)}"
+            f"    FPS: {self.fps:.0f}"
+        )
+
+        self.canvas.create_rectangle(
+            10,
+            10,
+            260,
+            38,
+            fill="#0b0d10",
+            outline="#252b34",
+        )
+
+        self.canvas.create_text(
+            20,
+            24,
+            text=text,
+            fill="#8e96a3",
+            font=("Arial", 9),
+            anchor="w",
+        )
+
+        if self.selected_agent is not None:
+            self.draw_selected_panel(
+                self.selected_agent
+            )
+
+    def draw_selected_panel(self, agent):
+        width = self.canvas.winfo_width()
+        height = self.canvas.winfo_height()
+
+        panel_width = 220
+        panel_height = 150
+
+        x1 = width - panel_width - 15
+        y1 = height - panel_height - 15
+        x2 = width - 15
+        y2 = height - 15
 
         self.canvas.create_rectangle(
             x1,
             y1,
             x2,
             y2,
-            fill="#1d1d1d",
-            outline="#444444"
+            fill="#12161c",
+            outline="#303742",
         )
 
-        agent_id = getattr(agent, "agent_id", None)
+        name = self.value(
+            agent,
+            "name",
+            "Agent",
+        )
 
-        if agent_id is None:
-            agent_id = getattr(agent, "id", "?")
+        state = self.value(
+            agent,
+            "state",
+            "unknown",
+        )
 
-        team = getattr(agent, "team", "unknown")
-        personality = getattr(agent, "personality", "unknown")
-        health = getattr(agent, "health", 0)
-        energy = getattr(agent, "energy", 0)
-        kills = getattr(agent, "kills", 0)
-        score = getattr(agent, "score", 0)
-        intelligence = getattr(agent, "intelligence", 0)
-        aggression = getattr(agent, "aggression", 0)
+        health = self.value(
+            agent,
+            "health",
+            0,
+        )
+
+        energy = self.value(
+            agent,
+            "energy",
+            0,
+        )
+
+        score = self.value(
+            agent,
+            "score",
+            0,
+        )
+
+        personality = self.value(
+            agent,
+            "personality",
+            "unknown",
+        )
 
         lines = [
-            f"Agent {agent_id}",
-            f"Team: {team}",
-            f"State: {self.get_agent_state(agent)}",
+            str(name),
+            f"State: {state}",
             f"Personality: {personality}",
-            f"Health: {health:.1f}",
-            f"Energy: {energy:.1f}",
-            f"Kills: {kills}",
-            f"Score: {score:.1f}",
-            f"Intelligence: {intelligence:.2f}",
-            f"Aggression: {aggression:.2f}",
+            f"Health: {health:.0f}",
+            f"Energy: {energy:.0f}",
+            f"Score: {score:.0f}",
         ]
 
         for index, line in enumerate(lines):
             self.canvas.create_text(
                 x1 + 12,
-                y1 + 12 + index * 17,
+                y1 + 12 + index * 21,
                 text=line,
-                anchor="w",
-                fill="#eeeeee",
-                font=("Segoe UI", 9)
+                fill="#d2d6dc",
+                font=(
+                    "Arial",
+                    10,
+                    "bold" if index == 0 else "normal",
+                ),
+                anchor="nw",
             )
 
-    def get_agent_state(self, agent):
-        if not getattr(agent, "alive", True):
-            return "DEAD"
+    def update_fps(self):
+        self.frame_count += 1
 
-        state = getattr(agent, "state", None)
+        now = time.perf_counter()
 
-        if state is None:
-            return "ACTIVE"
+        elapsed = now - self.fps_timer
 
-        if hasattr(state, "name"):
-            return state.name
+        if elapsed >= 1.0:
+            self.fps = (
+                self.frame_count / elapsed
+            )
 
-        return str(state)
+            self.frame_count = 0
+            self.fps_timer = now
 
-    # ---------------------------------------------------------
-    # OVERLAY
-    # ---------------------------------------------------------
-
-    def draw_overlay(self):
-        stats = {}
-
-        try:
-            stats = self.simulation.get_statistics()
-        except Exception:
-            pass
-
-        tick = stats.get(
-            "tick",
-            getattr(self.simulation, "tick", 0)
+    def on_canvas_click(self, event):
+        agent = self.find_agent_at(
+            event.x,
+            event.y,
         )
 
-        speed = stats.get(
-            "speed",
-            getattr(self.simulation, "speed", 1)
+        self.selected_agent = agent
+
+        self.draw(
+            force=True
         )
 
-        agents = stats.get(
+    def on_canvas_motion(self, event):
+        agent = self.find_agent_at(
+            event.x,
+            event.y,
+        )
+
+        if agent is not self.hovered_agent:
+            self.hovered_agent = agent
+
+            self.draw(
+                force=True
+            )
+
+    def on_canvas_leave(self, event):
+        if self.hovered_agent is not None:
+            self.hovered_agent = None
+
+            self.draw(
+                force=True
+            )
+
+    def find_agent_at(
+        self,
+        canvas_x,
+        canvas_y,
+    ):
+        world_x, world_y = self.canvas_to_world(
+            canvas_x,
+            canvas_y,
+        )
+
+        agents = getattr(
+            self.simulation.world,
             "agents",
-            len(getattr(self.simulation, "agents", []))
+            [],
         )
-
-        performance = {}
-
-        try:
-            performance = self.simulation.get_performance()
-        except Exception:
-            pass
-
-        fps = performance.get("fps", 0)
-
-        text = (
-            f"Agents: {agents}   "
-            f"Tick: {tick}   "
-            f"Speed: {speed:.2f}x   "
-            f"FPS: {fps:.1f}"
-        )
-
-        self.canvas.create_rectangle(
-            0,
-            self.height - 32,
-            self.width,
-            self.height,
-            fill="#1b1b1b",
-            outline=""
-        )
-
-        self.canvas.create_text(
-            12,
-            self.height - 16,
-            text=text,
-            anchor="w",
-            fill="#dddddd",
-            font=("Segoe UI", 9)
-        )
-
-    # ---------------------------------------------------------
-    # MOUSE
-    # ---------------------------------------------------------
-
-    def on_click(self, event):
-        agent = self.get_agent_at_position(event.x, event.y)
-
-        if agent is not None:
-            self.selected_agent = agent
-            self.render()
-        else:
-            self.selected_agent = None
-            self.render()
-
-    def get_agent_at_position(self, x, y):
-        agents = getattr(self.simulation, "agents", [])
 
         closest = None
         closest_distance = float("inf")
 
         for agent in agents:
-            if not getattr(agent, "alive", True):
+            if self.is_dead(agent):
                 continue
 
-            agent_x = getattr(agent, "x", 0)
-            agent_y = getattr(agent, "y", 0)
-            radius = getattr(agent, "radius", 10)
+            x = self.value(
+                agent,
+                "x",
+                0,
+            )
 
-            distance = (
-                (agent_x - x) ** 2 +
-                (agent_y - y) ** 2
-            ) ** 0.5
+            y = self.value(
+                agent,
+                "y",
+                0,
+            )
 
-            if distance <= radius + 5 and distance < closest_distance:
-                closest = agent
-                closest_distance = distance
+            dx = world_x - x
+            dy = world_y - y
+
+            distance = math.sqrt(
+                dx * dx + dy * dy
+            )
+
+            radius = self.value(
+                agent,
+                "radius",
+                10,
+            )
+
+            if distance <= radius * 1.8:
+                if distance < closest_distance:
+                    closest = agent
+                    closest_distance = distance
 
         return closest
 
-    def on_right_click(self, event):
+    def on_key_press(self, event):
+        key = event.keysym.lower()
+
+        if key == "g":
+            self.show_grid = not self.show_grid
+
+        elif key == "l":
+            self.show_labels = not self.show_labels
+
+        elif key == "h":
+            self.show_health = not self.show_health
+
+        elif key == "e":
+            self.show_energy = not self.show_energy
+
+        elif key == "t":
+            self.show_targets = not self.show_targets
+
+        elif key == "v":
+            self.show_vision = not self.show_vision
+
+        elif key == "r":
+            self.show_resources = not self.show_resources
+
+        elif key == "o":
+            self.show_obstacles = not self.show_obstacles
+
+        elif key == "f":
+            self.show_effects = not self.show_effects
+
+        elif key == "s":
+            self.show_spawn_points = not self.show_spawn_points
+
+        elif key == "escape":
+            self.selected_agent = None
+
+        elif key == "left":
+            self.select_previous_agent()
+
+        elif key == "right":
+            self.select_next_agent()
+
+        elif key == "up":
+            self.change_speed(1)
+
+        elif key == "down":
+            self.change_speed(-1)
+
+        self.draw(
+            force=True
+        )
+
+    def select_next_agent(self):
+        agents = self.get_alive_agents()
+
+        if not agents:
+            return
+
+        if self.selected_agent not in agents:
+            self.selected_agent = agents[0]
+
+        else:
+            index = agents.index(
+                self.selected_agent
+            )
+
+            index = (
+                index + 1
+            ) % len(agents)
+
+            self.selected_agent = agents[index]
+
+        self.draw(
+            force=True
+        )
+
+    def select_previous_agent(self):
+        agents = self.get_alive_agents()
+
+        if not agents:
+            return
+
+        if self.selected_agent not in agents:
+            self.selected_agent = agents[-1]
+
+        else:
+            index = agents.index(
+                self.selected_agent
+            )
+
+            index = (
+                index - 1
+            ) % len(agents)
+
+            self.selected_agent = agents[index]
+
+        self.draw(
+            force=True
+        )
+
+    def get_alive_agents(self):
+        agents = getattr(
+            self.simulation.world,
+            "agents",
+            [],
+        )
+
+        return [
+            agent
+            for agent in agents
+            if not self.is_dead(agent)
+        ]
+
+    def change_speed(self, direction):
+        if not hasattr(
+            self.simulation,
+            "speed_multiplier",
+        ):
+            return
+
+        current = self.simulation.speed_multiplier
+
+        if direction > 0:
+            current *= 1.25
+
+        else:
+            current /= 1.25
+
+        current = max(
+            0.1,
+            min(
+                10.0,
+                current,
+            ),
+        )
+
+        self.simulation.speed_multiplier = current
+
+    def show_context_menu(self, event):
+        if self.context_menu is not None:
+            try:
+                self.context_menu.destroy()
+
+            except Exception:
+                pass
+
+        self.context_menu = tk.Menu(
+            self.root,
+            tearoff=0,
+        )
+
+        self.context_menu.add_command(
+            label="Select agent",
+            command=lambda: self.context_select(
+                event.x,
+                event.y,
+            ),
+        )
+
+        self.context_menu.add_separator()
+
+        self.context_menu.add_command(
+            label="Toggle grid",
+            command=self.toggle_grid,
+        )
+
+        self.context_menu.add_command(
+            label="Toggle labels",
+            command=self.toggle_labels,
+        )
+
+        self.context_menu.add_command(
+            label="Toggle vision",
+            command=self.toggle_vision,
+        )
+
+        self.context_menu.add_command(
+            label="Toggle resources",
+            command=self.toggle_resources,
+        )
+
         try:
             self.context_menu.tk_popup(
                 event.x_root,
-                event.y_root
+                event.y_root,
             )
+
         finally:
             self.context_menu.grab_release()
 
-    # ---------------------------------------------------------
-    # CONTEXT MENU
-    # ---------------------------------------------------------
+    def context_select(
+        self,
+        x,
+        y,
+    ):
+        self.selected_agent = self.find_agent_at(
+            x,
+            y,
+        )
 
-    def toggle_targets(self):
-        self.show_targets = not self.show_targets
-        self.render()
+        self.draw(
+            force=True
+        )
 
-    def toggle_health(self):
-        self.show_health = not self.show_health
-        self.render()
+    def toggle_grid(self):
+        self.show_grid = not self.show_grid
+        self.draw(force=True)
 
-    def toggle_energy(self):
-        self.show_energy = not self.show_energy
-        self.render()
+    def toggle_labels(self):
+        self.show_labels = not self.show_labels
+        self.draw(force=True)
 
-    # ---------------------------------------------------------
-    # SPEED
-    # ---------------------------------------------------------
+    def toggle_vision(self):
+        self.show_vision = not self.show_vision
+        self.draw(force=True)
 
-    def change_speed(self, direction):
-        if direction > 0:
-            self.simulation.increase_speed()
-        else:
-            self.simulation.decrease_speed()
+    def toggle_resources(self):
+        self.show_resources = not self.show_resources
+        self.draw(force=True)
 
-        self.render()
+    def get_agent_color(self, agent):
+        team = self.value(
+            agent,
+            "team",
+            None,
+        )
 
-    # ---------------------------------------------------------
-    # STATE SIGNATURE
-    # ---------------------------------------------------------
+        if team is not None:
+            try:
+                team_index = int(team)
 
-    def build_state_signature(self):
-        agents = getattr(self.simulation, "agents", [])
+                return self.team_colors[
+                    team_index
+                    % len(self.team_colors)
+                ]
 
-        state = []
+            except Exception:
+                pass
 
-        for agent in agents:
-            state.append(
-                (
-                    getattr(agent, "agent_id", getattr(agent, "id", None)),
-                    round(getattr(agent, "x", 0), 1),
-                    round(getattr(agent, "y", 0), 1),
-                    getattr(agent, "team", None),
-                    getattr(agent, "alive", True),
-                    getattr(
-                        getattr(agent, "target", None),
-                        "agent_id",
-                        None
-                    )
-                )
+        personality = self.value(
+            agent,
+            "personality",
+            "balanced",
+        )
+
+        return self.agent_colors.get(
+            personality,
+            "#cccccc",
+        )
+
+    def is_dead(self, agent):
+        dead = self.value(
+            agent,
+            "dead",
+            False,
+        )
+
+        state = self.value(
+            agent,
+            "state",
+            "",
+        )
+
+        return (
+            bool(dead)
+            or state == "dead"
+            or self.value(
+                agent,
+                "health",
+                1,
+            ) <= 0
+        )
+
+    def value(
+        self,
+        obj,
+        name,
+        default=None,
+    ):
+        try:
+            value = getattr(
+                obj,
+                name,
+                default,
             )
 
-        return tuple(state)
+        except Exception:
+            return default
 
-    # ---------------------------------------------------------
-    # UPDATE
-    # ---------------------------------------------------------
+        return (
+            default
+            if value is None
+            else value
+        )
 
-    def update(self):
-        signature = self.build_state_signature()
+    def world_to_canvas(
+        self,
+        x,
+        y,
+    ):
+        world = self.simulation.world
 
-        if signature != self.last_state_signature:
-            self.render()
-            self.last_state_signature = signature
-        else:
-            self.render()
+        world_width = self.value(
+            world,
+            "width",
+            900,
+        )
 
-        self.after(30, self.update)
+        world_height = self.value(
+            world,
+            "height",
+            600,
+        )
 
-    # ---------------------------------------------------------
-    # START
-    # ---------------------------------------------------------
+        canvas_width = max(
+            1,
+            self.canvas.winfo_width(),
+        )
 
-    def start_updates(self):
-        self.last_state_signature = None
-        self.after(30, self.update)
+        canvas_height = max(
+            1,
+            self.canvas.winfo_height(),
+        )
+
+        scale_x = canvas_width / world_width
+        scale_y = canvas_height / world_height
+
+        scale = min(
+            scale_x,
+            scale_y,
+        )
+
+        rendered_width = world_width * scale
+        rendered_height = world_height * scale
+
+        offset_x = (
+            canvas_width - rendered_width
+        ) / 2
+
+        offset_y = (
+            canvas_height - rendered_height
+        ) / 2
+
+        return (
+            offset_x + x * scale,
+            offset_y + y * scale,
+        )
+
+    def canvas_to_world(
+        self,
+        x,
+        y,
+    ):
+        world = self.simulation.world
+
+        world_width = self.value(
+            world,
+            "width",
+            900,
+        )
+
+        world_height = self.value(
+            world,
+            "height",
+            600,
+        )
+
+        canvas_width = max(
+            1,
+            self.canvas.winfo_width(),
+        )
+
+        canvas_height = max(
+            1,
+            self.canvas.winfo_height(),
+        )
+
+        scale_x = canvas_width / world_width
+        scale_y = canvas_height / world_height
+
+        scale = min(
+            scale_x,
+            scale_y,
+        )
+
+        rendered_width = world_width * scale
+        rendered_height = world_height * scale
+
+        offset_x = (
+            canvas_width - rendered_width
+        ) / 2
+
+        offset_y = (
+            canvas_height - rendered_height
+        ) / 2
+
+        if scale <= 0:
+            return 0, 0
+
+        return (
+            (x - offset_x) / scale,
+            (y - offset_y) / scale,
+        )
+
+    def add_attack_effect(
+        self,
+        x,
+        y,
+        duration=0.25,
+    ):
+        self.attack_effects.append(
+            {
+                "x": x,
+                "y": y,
+                "time": time.perf_counter(),
+                "duration": duration,
+            }
+        )
+
+    def resize(
+        self,
+        width,
+        height,
+    ):
+        self.canvas_width = width
+        self.canvas_height = height
+
+        self.canvas.config(
+            width=width,
+            height=height,
+        )
+
+        self.draw(
+            force=True
+        )
+
+    def destroy(self):
+        try:
+            self.canvas.destroy()
+
+        except Exception:
+            pass
+
+        if self.context_menu is not None:
+            try:
+                self.context_menu.destroy()
+
+            except Exception:
+                pass
+
+    def __repr__(self):
+        return (
+            f"<Arena "
+            f"version={self.VERSION!r} "
+            f"fps={self.fps:.1f}>"
+        )
