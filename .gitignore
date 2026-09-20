@@ -2,3 +2,15 @@
 __pycache__/
 *.pyc
 .vscode/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Generated files
+simulation.txt
+__pycache__/
+*.pyc
+.venv/
+venv/
