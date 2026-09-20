@@ -1,14 +1,10 @@
 name: Build AI Arena Windows EXE
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
-
-  workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -31,19 +27,11 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller `
-            --noconfirm `
-            --clean `
-            --onedir `
-            --windowed `
-            --name "AI-Arena" `
-            main.py
+          pyinstaller --noconfirm --clean --onedir --windowed --name "AI-Arena" main.py
 
       - name: Create ZIP
-        powershell: |
-          Compress-Archive `
-            -Path "dist\AI-Arena\*" `
-            -DestinationPath "AI-Arena-Windows.zip"
+        run: |
+          Compress-Archive -Path "dist\\AI-Arena\\*" -DestinationPath "AI-Arena-Windows.zip"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
