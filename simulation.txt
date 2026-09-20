@@ -1,0 +1,1096 @@
+import random
+import time
+
+from agent import Agent
+from world import World
+
+
+VERSION = "0.4.4"
+
+
+class Simulation:
+    def __init__(
+        self,
+        width=900,
+        height=600,
+        agent_count=3,
+    ):
+        self.width = width
+        self.height = height
+
+        self.agent_count = agent_count
+
+        self.world = World(
+            width,
+            height,
+        )
+
+        self.running = False
+        self.paused = False
+        self.finished = False
+
+        self.tick = 0
+        self.round = 1
+
+        self.simulation_speed = 1.0
+
+        self.min_speed = 0.25
+        self.max_speed = 8.0
+
+        self.base_tick_rate = 30.0
+
+        self.tick_interval = (
+            1.0 / self.base_tick_rate
+        )
+
+        self.accumulator = 0.0
+        self.last_update_time = time.perf_counter()
+
+        self.max_ticks_per_update = 5
+
+        self.total_ticks = 0
+
+        self.start_time = None
+        self.elapsed_time = 0.0
+
+        self.winner = None
+
+        self.team_mode = False
+        self.combat_enabled = True
+        self.resources_enabled = True
+
+        self.history = []
+        self.event_log = []
+
+        self.total_attacks = 0
+        self.total_damage = 0.0
+        self.total_deaths = 0
+
+        self.performance = {
+            "fps": 0.0,
+            "simulation_tps": 0.0,
+            "last_update_ms": 0.0,
+            "agent_update_ms": 0.0,
+            "combat_ms": 0.0,
+            "world_ms": 0.0,
+            "total_ms": 0.0,
+        }
+
+        self._performance_time = time.perf_counter()
+        self._performance_frames = 0
+        self._performance_ticks = 0
+
+        self._last_agent_count = -1
+        self._last_alive_count = -1
+
+        self.create_agents()
+
+    def create_agents(self):
+        """Create the initial set of agents."""
+        self.agents = []
+
+        personalities = [
+            "aggressive",
+            "defensive",
+            "explorer",
+            "balanced",
+        ]
+
+        for i in range(self.agent_count):
+            personality = personalities[i % len(personalities)]
+
+            agent = Agent(
+                i,
+                x=random.uniform(
+                    50,
+                    self.width - 50,
+                ),
+                y=random.uniform(
+                    50,
+                    self.height - 50,
+                ),
+                personality=personality,
+            )
+
+            self.agents.append(agent)
+
+        if hasattr(self.world, "agents"):
+            self.world.agents = self.agents
+
+    def add_agent(
+        self,
+        personality="balanced",
+        x=None,
+        y=None,
+    ):
+        if x is None:
+            x = random.uniform(
+                50,
+                self.width - 50,
+            )
+
+        if y is None:
+            y = random.uniform(
+                50,
+                self.height - 50,
+            )
+
+        agent = Agent(
+            len(self.world.agents),
+            x=x,
+            y=y,
+            personality=personality,
+        )
+
+        self.world.agents.append(agent)
+
+        self.agent_count = len(
+            self.world.agents
+        )
+
+        return agent
+
+    def remove_agent(self, agent):
+        if agent in self.world.agents:
+            self.world.agents.remove(agent)
+
+            self.agent_count = len(
+                self.world.agents
+            )
+
+    def start(self):
+        if self.finished:
+            return
+
+        self.running = True
+        self.paused = False
+
+        self.last_update_time = time.perf_counter()
+
+        if self.start_time is None:
+            self.start_time = time.perf_counter()
+
+        self.log_event(
+            "Simulation started"
+        )
+
+    def stop(self):
+        self.running = False
+        self.paused = True
+
+        self.log_event(
+            "Simulation paused"
+        )
+
+    def pause(self):
+        self.stop()
+
+    def resume(self):
+        if self.finished:
+            return
+
+        self.running = True
+        self.paused = False
+
+        self.last_update_time = time.perf_counter()
+
+        self.log_event(
+            "Simulation resumed"
+        )
+
+    def toggle(self):
+        if self.running:
+            self.stop()
+        else:
+            self.start()
+
+    def reset(self):
+        self.running = False
+        self.paused = False
+        self.finished = False
+
+        self.tick = 0
+        self.total_ticks = 0
+        self.round = 1
+
+        self.accumulator = 0.0
+
+        self.start_time = None
+        self.elapsed_time = 0.0
+
+        self.winner = None
+
+        self.history.clear()
+        self.event_log.clear()
+
+        self.total_attacks = 0
+        self.total_damage = 0.0
+        self.total_deaths = 0
+
+        self.performance = {
+            "fps": 0.0,
+            "simulation_tps": 0.0,
+            "last_update_ms": 0.0,
+            "agent_update_ms": 0.0,
+            "combat_ms": 0.0,
+            "world_ms": 0.0,
+            "total_ms": 0.0,
+        }
+
+        self._performance_time = time.perf_counter()
+        self._performance_frames = 0
+        self._performance_ticks = 0
+
+        self.world.reset()
+
+        self.create_agents()
+
+        self.last_update_time = time.perf_counter()
+
+        self.log_event(
+            "Simulation reset"
+        )
+
+    def set_speed(self, speed):
+        speed = float(speed)
+
+        speed = max(
+            self.min_speed,
+            min(
+                self.max_speed,
+                speed,
+            ),
+        )
+
+        self.simulation_speed = speed
+
+        return self.simulation_speed
+
+    def increase_speed(self):
+        new_speed = self.simulation_speed * 2
+
+        if new_speed > self.max_speed:
+            new_speed = self.max_speed
+
+        self.simulation_speed = new_speed
+
+        return self.simulation_speed
+
+    def decrease_speed(self):
+        new_speed = self.simulation_speed / 2
+
+        if new_speed < self.min_speed:
+            new_speed = self.min_speed
+
+        self.simulation_speed = new_speed
+
+        return self.simulation_speed
+
+    def update(self):
+        update_start = time.perf_counter()
+
+        now = time.perf_counter()
+
+        delta = now - self.last_update_time
+
+        self.last_update_time = now
+
+        if delta < 0:
+            delta = 0
+
+        if delta > 0.25:
+            delta = 0.25
+
+        self._performance_frames += 1
+
+        if self.running and not self.finished:
+            self.accumulator += (
+                delta
+                * self.simulation_speed
+            )
+
+            ticks_this_update = 0
+
+            while (
+                self.accumulator
+                >= self.tick_interval
+                and ticks_this_update
+                < self.max_ticks_per_update
+            ):
+                self._run_tick()
+
+                self.accumulator -= (
+                    self.tick_interval
+                )
+
+                ticks_this_update += 1
+
+            if ticks_this_update >= self.max_ticks_per_update:
+                self.accumulator = min(
+                    self.accumulator,
+                    self.tick_interval,
+                )
+
+        self.update_elapsed_time()
+
+        total_time = (
+            time.perf_counter()
+            - update_start
+        )
+
+        self.performance[
+            "last_update_ms"
+        ] = total_time * 1000
+
+        self.performance[
+            "total_ms"
+        ] = total_time * 1000
+
+        self.update_performance()
+
+    def _run_tick(self):
+        tick_start = time.perf_counter()
+
+        self.tick += 1
+        self.total_ticks += 1
+
+        self._performance_ticks += 1
+
+        alive_before = self.get_alive_count()
+
+        agent_start = time.perf_counter()
+
+        self.update_agents()
+
+        agent_time = (
+            time.perf_counter()
+            - agent_start
+        )
+
+        self.performance[
+            "agent_update_ms"
+        ] = agent_time * 1000
+
+        combat_start = time.perf_counter()
+
+        if self.combat_enabled:
+            self.process_combat()
+
+        combat_time = (
+            time.perf_counter()
+            - combat_start
+        )
+
+        self.performance[
+            "combat_ms"
+        ] = combat_time * 1000
+
+        world_start = time.perf_counter()
+
+        if self.resources_enabled:
+            self.update_resources()
+
+        self.update_world()
+
+        world_time = (
+            time.perf_counter()
+            - world_start
+        )
+
+        self.performance[
+            "world_ms"
+        ] = world_time * 1000
+
+        self.update_statistics()
+
+        alive_after = self.get_alive_count()
+
+        if alive_after < alive_before:
+            self.total_deaths += (
+                alive_before
+                - alive_after
+            )
+
+        self.check_finished()
+
+        self.record_history()
+
+        tick_time = (
+            time.perf_counter()
+            - tick_start
+        )
+
+        self.performance[
+            "total_ms"
+        ] = tick_time * 1000
+
+    def update_agents(self):
+        agents = self.world.agents
+
+        if not agents:
+            return
+
+        for agent in agents:
+            if getattr(
+                agent,
+                "state",
+                None
+            ) == "dead":
+                continue
+
+            try:
+                agent.update(
+                    self.world
+                )
+            except TypeError:
+                try:
+                    agent.update()
+                except Exception:
+                    continue
+            except Exception:
+                continue
+
+    def process_combat(self):
+        agents = self.world.agents
+
+        alive_agents = [
+            agent
+            for agent in agents
+            if getattr(
+                agent,
+                "state",
+                None
+            ) != "dead"
+            and getattr(
+                agent,
+                "health",
+                1
+            ) > 0
+        ]
+
+        if len(alive_agents) < 2:
+            return
+
+        for attacker in alive_agents:
+            target = getattr(
+                attacker,
+                "target",
+                None
+            )
+
+            if target is None:
+                continue
+
+            if target is attacker:
+                continue
+
+            if target not in alive_agents:
+                continue
+
+            if not self.can_attack(
+                attacker,
+                target
+            ):
+                continue
+
+            damage = self.calculate_damage(
+                attacker,
+                target
+            )
+
+            if damage <= 0:
+                continue
+
+            self.apply_damage(
+                attacker,
+                target,
+                damage
+            )
+
+    def can_attack(
+        self,
+        attacker,
+        target,
+    ):
+        attack_range = getattr(
+            attacker,
+            "attack_range",
+            35
+        )
+
+        attacker_x = getattr(
+            attacker,
+            "x",
+            0
+        )
+
+        attacker_y = getattr(
+            attacker,
+            "y",
+            0
+        )
+
+        target_x = getattr(
+            target,
+            "x",
+            0
+        )
+
+        target_y = getattr(
+            target,
+            "y",
+            0
+        )
+
+        dx = target_x - attacker_x
+        dy = target_y - attacker_y
+
+        distance_squared = (
+            dx * dx
+            + dy * dy
+        )
+
+        return (
+            distance_squared
+            <= attack_range * attack_range
+        )
+
+    def calculate_damage(
+        self,
+        attacker,
+        target,
+    ):
+        base_damage = random.uniform(
+            4.0,
+            9.0,
+        )
+
+        aggression = getattr(
+            attacker,
+            "aggression",
+            0.5
+        )
+
+        intelligence = getattr(
+            attacker,
+            "intelligence",
+            0.5
+        )
+
+        caution = getattr(
+            target,
+            "caution",
+            0.5
+        )
+
+        multiplier = (
+            0.75
+            + aggression * 0.5
+            + intelligence * 0.25
+            - caution * 0.2
+        )
+
+        damage = base_damage * multiplier
+
+        return max(
+            0.5,
+            damage,
+        )
+
+    def apply_damage(
+        self,
+        attacker,
+        target,
+        damage,
+    ):
+        if not hasattr(
+            target,
+            "health"
+        ):
+            return
+
+        old_health = target.health
+
+        target.health = max(
+            0,
+            target.health - damage
+        )
+
+        actual_damage = (
+            old_health
+            - target.health
+        )
+
+        self.total_damage += (
+            actual_damage
+        )
+
+        self.total_attacks += 1
+
+        if actual_damage <= 0:
+            return
+
+        attacker_name = getattr(
+            attacker,
+            "name",
+            f"Agent {getattr(attacker, 'id', '?')}"
+        )
+
+        target_name = getattr(
+            target,
+            "name",
+            f"Agent {getattr(target, 'id', '?')}"
+        )
+
+        if target.health <= 0:
+            self.handle_death(
+                target,
+                attacker
+            )
+
+            self.log_event(
+                f"{attacker_name} eliminated "
+                f"{target_name}"
+            )
+
+        elif self.total_attacks % 10 == 0:
+            self.log_event(
+                f"{attacker_name} dealt "
+                f"{actual_damage:.1f} damage to "
+                f"{target_name}"
+            )
+
+    def handle_death(
+        self,
+        agent,
+        killer=None,
+    ):
+        try:
+            agent.health = 0
+        except Exception:
+            pass
+
+        try:
+            agent.state = "dead"
+        except Exception:
+            pass
+
+        try:
+            agent.target = None
+        except Exception:
+            pass
+
+        if killer is not None:
+            if not hasattr(
+                killer,
+                "kills"
+            ):
+                killer.kills = 0
+
+            killer.kills += 1
+
+            if not hasattr(
+                killer,
+                "score"
+            ):
+                killer.score = 0
+
+            killer.score += 100
+
+    def update_resources(self):
+        resources = getattr(
+            self.world,
+            "resources",
+            []
+        )
+
+        for resource in resources:
+            try:
+                resource.update(
+                    self.tick
+                )
+            except TypeError:
+                try:
+                    resource.update()
+                except Exception:
+                    continue
+            except Exception:
+                continue
+
+    def update_world(self):
+        try:
+            self.world.update()
+        except TypeError:
+            try:
+                self.world.update(
+                    self.tick
+                )
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def update_statistics(self):
+        alive_count = self.get_alive_count()
+
+        self._last_agent_count = len(
+            self.world.agents
+        )
+
+        self._last_alive_count = (
+            alive_count
+        )
+
+        if hasattr(
+            self.world,
+            "statistics"
+        ):
+            try:
+                self.world.statistics[
+                    "ticks"
+                ] = self.tick
+
+                self.world.statistics[
+                    "alive"
+                ] = alive_count
+
+                self.world.statistics[
+                    "deaths"
+                ] = self.total_deaths
+
+                self.world.statistics[
+                    "damage"
+                ] = self.total_damage
+
+            except Exception:
+                pass
+
+    def update_elapsed_time(self):
+        if self.start_time is None:
+            self.elapsed_time = 0.0
+            return
+
+        self.elapsed_time = (
+            time.perf_counter()
+            - self.start_time
+        )
+
+    def update_performance(self):
+        now = time.perf_counter()
+
+        elapsed = (
+            now
+            - self._performance_time
+        )
+
+        if elapsed < 1.0:
+            return
+
+        self.performance[
+            "fps"
+        ] = (
+            self._performance_frames
+            / elapsed
+        )
+
+        self.performance[
+            "simulation_tps"
+        ] = (
+            self._performance_ticks
+            / elapsed
+        )
+
+        self._performance_frames = 0
+        self._performance_ticks = 0
+
+        self._performance_time = now
+
+    def check_finished(self):
+        alive_agents = [
+            agent
+            for agent in self.world.agents
+            if getattr(
+                agent,
+                "state",
+                None
+            ) != "dead"
+            and getattr(
+                agent,
+                "health",
+                1
+            ) > 0
+        ]
+
+        if len(alive_agents) == 1:
+            self.winner = alive_agents[0]
+
+        elif len(alive_agents) == 0:
+            self.winner = None
+
+        else:
+            return
+
+        self.finished = True
+        self.running = False
+        self.paused = False
+
+        if self.winner is not None:
+            winner_name = getattr(
+                self.winner,
+                "name",
+                f"Agent {getattr(self.winner, 'id', '?')}"
+            )
+
+            self.log_event(
+                f"{winner_name} won the simulation"
+            )
+
+        else:
+            self.log_event(
+                "Simulation ended with no winner"
+            )
+
+    def record_history(self):
+        if self.tick % 30 != 0:
+            return
+
+        alive_count = self.get_alive_count()
+
+        snapshot = {
+            "tick": self.tick,
+            "alive": alive_count,
+            "agents": len(
+                self.world.agents
+            ),
+            "damage": self.total_damage,
+            "attacks": self.total_attacks,
+            "deaths": self.total_deaths,
+        }
+
+        self.history.append(
+            snapshot
+        )
+
+        if len(self.history) > 1000:
+            self.history.pop(0)
+
+    def log_event(self, message):
+        entry = {
+            "tick": self.tick,
+            "time": self.elapsed_time,
+            "message": str(message),
+        }
+
+        self.event_log.append(entry)
+
+        if len(self.event_log) > 500:
+            self.event_log.pop(0)
+
+    def get_alive_agents(self):
+        return [
+            agent
+            for agent in self.world.agents
+            if getattr(
+                agent,
+                "state",
+                None
+            ) != "dead"
+            and getattr(
+                agent,
+                "health",
+                1
+            ) > 0
+        ]
+
+    def get_alive_count(self):
+        return len(
+            self.get_alive_agents()
+        )
+
+    def get_dead_count(self):
+        return (
+            len(self.world.agents)
+            - self.get_alive_count()
+        )
+
+    def get_agent_count(self):
+        return len(
+            self.world.agents
+        )
+
+    def get_winner(self):
+        return self.winner
+
+    def get_speed(self):
+        return self.simulation_speed
+
+    def get_fps(self):
+        return self.performance[
+            "fps"
+        ]
+
+    def get_simulation_tps(self):
+        return self.performance[
+            "simulation_tps"
+        ]
+
+    def get_performance(self):
+        return dict(
+            self.performance
+        )
+
+    def get_statistics(self):
+        return {
+            "version": VERSION,
+            "tick": self.tick,
+            "round": self.round,
+            "running": self.running,
+            "paused": self.paused,
+            "finished": self.finished,
+            "speed": self.simulation_speed,
+            "agents": self.get_agent_count(),
+            "alive": self.get_alive_count(),
+            "dead": self.get_dead_count(),
+            "attacks": self.total_attacks,
+            "damage": self.total_damage,
+            "deaths": self.total_deaths,
+            "elapsed_time": self.elapsed_time,
+            "fps": self.get_fps(),
+            "simulation_tps": self.get_simulation_tps(),
+        }
+
+    def get_rankings(self):
+        agents = list(
+            self.world.agents
+        )
+
+        def score(agent):
+            return (
+                getattr(
+                    agent,
+                    "score",
+                    0
+                )
+                + getattr(
+                    agent,
+                    "kills",
+                    0
+                ) * 100
+                + getattr(
+                    agent,
+                    "health",
+                    0
+                )
+            )
+
+        agents.sort(
+            key=score,
+            reverse=True
+        )
+
+        return agents
+
+    def get_team_agents(
+        self,
+        team,
+    ):
+        return [
+            agent
+            for agent in self.world.agents
+            if getattr(
+                agent,
+                "team",
+                None
+            ) == team
+        ]
+
+    def set_team_mode(
+        self,
+        enabled=True,
+    ):
+        self.team_mode = bool(
+            enabled
+        )
+
+        if self.team_mode:
+            self.assign_teams()
+
+    def assign_teams(self):
+        teams = [
+            "red",
+            "blue",
+        ]
+
+        for index, agent in enumerate(
+            self.world.agents
+        ):
+            try:
+                agent.team = teams[
+                    index % len(teams)
+                ]
+            except Exception:
+                pass
+
+    def get_team_counts(self):
+        counts = {}
+
+        for agent in self.world.agents:
+            team = getattr(
+                agent,
+                "team",
+                "neutral"
+            )
+
+            counts[team] = (
+                counts.get(team, 0)
+                + 1
+            )
+
+        return counts
+
+    def export_results(self):
+        return {
+            "version": VERSION,
+            "tick": self.tick,
+            "round": self.round,
+            "winner": (
+                getattr(
+                    self.winner,
+                    "name",
+                    None
+                )
+                if self.winner
+                else None
+            ),
+            "agents": self.get_agent_count(),
+            "alive": self.get_alive_count(),
+            "dead": self.get_dead_count(),
+            "attacks": self.total_attacks,
+            "damage": self.total_damage,
+            "deaths": self.total_deaths,
+            "elapsed_time": self.elapsed_time,
+            "history": list(
+                self.history
+            ),
+        }
+
+    def get_event_log(self):
+        return list(
+            self.event_log
+        )
+
+    def clear_event_log(self):
+        self.event_log.clear()
+
+    def get_version(self):
+        return VERSION
+
+    def __repr__(self):
+        return (
+            f"<Simulation "
+            f"v{VERSION} "
+            f"tick={self.tick} "
+            f"agents={self.get_agent_count()} "
+            f"alive={self.get_alive_count()} "
+            f"speed={self.simulation_speed}x>"
+        )
