@@ -137,6 +137,20 @@ class Agent:
 
         self.kills = 0
 
+        # Simulation statistics initialised here so agents are safe to use
+        # independently as well as through the Simulation controller.
+        self.score = 0.0
+        self.rank = 0
+        self.attacks = 0
+        self.successful_attacks = 0
+        self.last_action = None
+        self.survival_ticks = 0
+        self.resources_collected = 0.0
+        self.exploration_score = 0.0
+        self.combat_score = 0.0
+        self.survival_score = 0.0
+        self.behaviour_score = 0.0
+
         self.events = []
 
         self.event_limit = 50
