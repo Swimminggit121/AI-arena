@@ -24,7 +24,7 @@ class Simulation:
     - Winners
     """
 
-    VERSION = "0.5.3"
+    VERSION = "0.5.5"
 
     def __init__(
         self,
