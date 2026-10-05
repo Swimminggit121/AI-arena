@@ -4,7 +4,7 @@ import tkinter as tk
 
 
 class Arena:
-    VERSION = "0.5.3"
+    VERSION = "0.5.5"
 
     def __init__(self, root, simulation):
         self.root = root
