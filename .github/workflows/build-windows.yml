@@ -27,7 +27,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --noconfirm --clean --onedir --windowed --name "AI-Arena" main.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name "AI-Arena" main.py
 
       - name: Create ZIP
         run: |
@@ -37,11 +37,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AI-Arena-Windows
-          path: AI-Arena-Windows.zip
+          path: dist/AI-Arena.exe
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: AI-Arena-Windows.zip
+          files: dist/AI-Arena.exe
           generate_release_notes: true
