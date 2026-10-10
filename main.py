@@ -9,8 +9,9 @@ class AIArena:
         self.root = root
 
         self.root.title("AI Arena")
-        self.root.geometry("980x760")
-        self.root.minsize(980, 760)
+        # Keep the whole interface above a fixed Windows taskbar.
+        self.root.geometry("800x650")
+        self.root.minsize(640, 480)
         self.root.configure(background="#0b0d10")
 
         self.simulation = Simulation(
@@ -38,8 +39,8 @@ class AIArena:
 
         header.pack(
             fill="x",
-            padx=20,
-            pady=(15, 0)
+            padx=10,
+            pady=(7, 0)
         )
 
         title = tk.Label(
@@ -47,7 +48,7 @@ class AIArena:
             text="AI ARENA",
             background="#0b0d10",
             foreground="#ffffff",
-            font=("Arial", 22, "bold")
+            font=("Arial", 18, "bold")
         )
 
         title.pack(side="left")
@@ -57,12 +58,12 @@ class AIArena:
             text="STOPPED",
             background="#0b0d10",
             foreground="#888888",
-            font=("Arial", 10, "bold")
+            font=("Arial", 9, "bold")
         )
 
         self.status_label.pack(
             side="right",
-            pady=5
+            pady=2
         )
 
     def create_controls(self):
@@ -73,8 +74,8 @@ class AIArena:
 
         controls.pack(
             fill="x",
-            padx=20,
-            pady=(0, 15)
+            padx=10,
+            pady=(0, 7)
         )
 
         self.start_button = tk.Button(
@@ -86,9 +87,9 @@ class AIArena:
             activebackground="#282f3a",
             activeforeground="#ffffff",
             relief="flat",
-            padx=20,
-            pady=8,
-            font=("Arial", 10, "bold")
+            padx=14,
+            pady=4,
+            font=("Arial", 9, "bold")
         )
 
         self.start_button.pack(side="left")
@@ -102,14 +103,14 @@ class AIArena:
             activebackground="#282f3a",
             activeforeground="#ffffff",
             relief="flat",
-            padx=20,
-            pady=8,
-            font=("Arial", 10, "bold")
+            padx=14,
+            pady=4,
+            font=("Arial", 9, "bold")
         )
 
         reset_button.pack(
             side="left",
-            padx=(10, 0)
+            padx=(6, 0)
         )
 
         self.tick_label = tk.Label(
@@ -117,7 +118,7 @@ class AIArena:
             text="Tick: 0",
             background="#0b0d10",
             foreground="#888888",
-            font=("Arial", 10)
+            font=("Arial", 9)
         )
 
         self.tick_label.pack(
